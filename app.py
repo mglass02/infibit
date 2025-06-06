@@ -285,54 +285,59 @@ with st.sidebar:
         """,
         unsafe_allow_html=True
     )
-    tab_login, tab_signup = st.tabs([t("Login"), t("Sign Up")])
 
-    # Login Tab
-    with tab_login:
-        email = st.text_input(t("Email"), key="login_email")
-        password = st.text_input(t("Password"), type="password", key="login_password")
-        if st.button(t("Login")):
-            if email and password:
-                users = load_users()
-                user = users.get(email)
-                if user and check_password(password, user["password_hash"]):
-                    st.session_state.user_email = email
-                    st.session_state.wallet_address = user["wallet_address"]
-                    st.session_state.subscribed = check_subscription(email)
-                    st.session_state.subscription_checked = True
-                    st.success(t("Logged in successfully!"))
-                else:
-                    st.error(t("Invalid email or password."))
-            else:
-                st.error(t("Please enter email and password."))
+    # Show login/sign-up tabs only for non-logged-in users
+    if not st.session_state.user_email:
+        tab_login, tab_signup = st.tabs([t("Login"), t("Sign Up")])
 
-    # Sign-Up Tab
-    with tab_signup:
-        new_email = st.text_input(t("Email"), key="signup_email")
-        new_wallet = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
-        new_password = st.text_input(t("Password"), type="password", key="signup_password")
-        if st.button(t("Sign Up")):
-            if new_email and new_wallet and new_password:
-                if not validate_wallet_address(new_wallet):
-                    st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
-                else:
+        # Login Tab
+        with tab_login:
+            email = st.text_input(t("Email"), key="login_email")
+            password = st.text_input(t("Password"), type="password", key="login_password")
+            if st.button(t("Login"), key="login_button"):
+                if email and password:
                     users = load_users()
-                    if new_email in users:
-                        st.error(t("Email already registered."))
+                    user = users.get(email)
+                    if user and check_password(password, user["password_hash"]):
+                        st.session_state.user_email = email
+                        st.session_state.wallet_address = user["wallet_address"]
+                        st.session_state.subscribed = check_subscription(email)
+                        st.session_state.subscription_checked = True
+                        st.success(t("Logged in successfully!"))
+                        st.rerun()  # Rerun to update sidebar
                     else:
-                        users[new_email] = {
-                            "wallet_address": new_wallet,
-                            "password_hash": hash_password(new_password),
-                            "created_at": datetime.now(timezone.utc).isoformat()
-                        }
-                        save_users(users)
-                        st.success(t("Signed up successfully! Please log in."))
-            else:
-                st.error(t("Please fill out all fields."))
+                        st.error(t("Invalid email or password."))
+                else:
+                    st.error(t("Please enter email and password."))
+
+        # Sign-Up Tab
+        with tab_signup:
+            new_email = st.text_input(t("Email"), key="signup_email")
+            new_wallet = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
+            new_password = st.text_input(t("Password"), type="password", key="signup_password")
+            if st.button(t("Sign Up"), key="signup_button"):
+                if new_email and new_wallet and new_password:
+                    if not validate_wallet_address(new_wallet):
+                        st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
+                    else:
+                        users = load_users()
+                        if new_email in users:
+                            st.error(t("Email already registered."))
+                        else:
+                            users[new_email] = {
+                                "wallet_address": new_wallet,
+                                "password_hash": hash_password(new_password),
+                                "created_at": datetime.now(timezone.utc).isoformat()
+                            }
+                            save_users(users)
+                            st.success(t("Signed up successfully! Please log in."))
+                else:
+                    st.error(t("Please fill out all fields."))
 
     # Sidebar Controls (only for logged-in users)
-    if st.session_state.user_email:
-        if st.button(t("Logout")):
+    else:
+        st.markdown(f"<p style='color: #4A4A4A;'>{t('Logged in as')} {st.session_state.user_email}</p>", unsafe_allow_html=True)
+        if st.button(t("Logout"), key="logout_button"):
             st.session_state.user_email = None
             st.session_state.subscribed = False
             st.session_state.wallet_address = ""
@@ -341,7 +346,7 @@ with st.sidebar:
         currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
         language = LANGUAGE_OPTIONS[language_label]
-        tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"))
+        tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"), key="tx_limit_select")
 
 # --- Main App Logic ---
 if st.session_state.user_email:
@@ -383,7 +388,7 @@ if st.session_state.user_email:
                 ],
                 mode="subscription",
                 success_url="https://your-app-name.streamlit.app/?subscribed=true",  # Replace with your app URL
-                cancel_url="https://your-app-name.streamlit.app/?subscribed=false",
+                cancel_url="your-app-name.streamlit.app/?subscribed=false",
                 client_reference_id=st.session_state.user_email,
             )
             st.markdown(
