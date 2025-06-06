@@ -10,6 +10,11 @@ import plotly.graph_objects as go
 import json
 import os
 import re
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -227,8 +232,11 @@ price_cache = {}
 def get_current_btc_price():
     url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
     try:
-        return requests.get(url).json().get("bitcoin", {}).get("usd", 0)
-    except:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("bitcoin", {}).get("usd", 0)
+    except Exception as e:
+        logger.error(f"Error fetching BTC price: {e}")
         return 0
 
 @st.cache_data(ttl=3600)
@@ -239,47 +247,59 @@ def get_historical_price(date_str):
     ts = int(dt.replace(tzinfo=timezone.utc).timestamp())
     url = f"https://min-api.cryptocompare.com/data/pricehistorical?fsym=BTC&tsyms=USD&ts={ts}"
     try:
-        resp = requests.get(url)
-        price = resp.json().get("BTC", {}).get("USD", 0)
+        response = requests.get(url)
+        response.raise_for_status()
+        price = response.json().get("BTC", {}).get("USD", 0)
         price_cache[date_str] = price
         return price
-    except:
+    except Exception as e:
+        logger.error(f"Error fetching historical price for {date_str}: {e}")
         return 0
 
 @st.cache_data(ttl=3600)
 def get_txs_all(address):
     all_txs = []
     url = f"https://blockstream.info/api/address/{address}/txs"
-    while True:
-        resp = requests.get(url)
-        if resp.status_code != 200:
-            break
-        txs = resp.json()
+    try:
+        logger.info(f"Fetching transactions for address: {address}")
+        response = requests.get(url)
+        response.raise_for_status()
+        txs = response.json()
         if not txs:
-            break
-        all_txs.extend(txs)
-        if len(txs) < 25:
-            break
-        last_txid = txs[-1]['txid']
-        url = f"https://blockstream.info/api/address/{address}/txs/chain/{last_txid}"
-    return all_txs
+            logger.warning(f"No transactions found for address: {address}")
+            return []
+        # Limit to the most recent 20 transactions
+        all_txs.extend(txs[:20])
+        logger.info(f"Fetched {len(all_txs)} transactions for address: {address}")
+        return all_txs
+    except Exception as e:
+        logger.error(f"Error fetching transactions for {address}: {e}")
+        st.error(t("Failed to fetch transactions. Please try again later."))
+        return []
 
 @st.cache_data(ttl=3600)
 def get_tx_details(txid):
     url = f"https://blockstream.info/api/tx/{txid}"
-    resp = requests.get(url)
-    return resp.json() if resp.status_code == 200 else {}
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error fetching transaction details for {txid}: {e}")
+        return {}
 
 @st.cache_data(ttl=86400)
 def get_btc_historical_prices(days=30):
     url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days={days}"
     try:
-        resp = requests.get(url)
-        prices = resp.json().get("prices", [])
+        response = requests.get(url)
+        response.raise_for_status()
+        prices = response.json().get("prices", [])
         return pd.DataFrame(prices, columns=["timestamp", "price"]).assign(
             date=lambda x: pd.to_datetime(x["timestamp"], unit="ms").dt.date
         )
-    except:
+    except Exception as e:
+        logger.error(f"Error fetching historical BTC prices: {e}")
         return pd.DataFrame()
 
 # --- Currency Rates from Frankfurter API ---
@@ -288,12 +308,14 @@ def get_currency_rates():
     url = "https://api.frankfurter.app/latest?from=USD&to=USD,GBP,EUR"
     try:
         response = requests.get(url)
+        response.raise_for_status()
         data = response.json()
         rates = data.get("rates", {})
         if "USD" not in rates:
             rates["USD"] = 1.0
         return rates
-    except:
+    except Exception as e:
+        logger.error(f"Error fetching currency rates: {e}")
         return {"USD": 1.0, "GBP": 0.78, "EUR": 0.92}
 
 # --- Stats Logic ---
@@ -330,14 +352,15 @@ def get_wallet_stats(address):
             usd_out = btc_out * btc_price
             total_btc_out += btc_out
             total_usd_out += usd_out
-            data.append([date_str, "OUT", btc_out, btc_price, usd_out, txid, confirmed, counterparties[0] if counterparties else "N/A"])
+            data.append([date_str, "OUT", btc_out, btc_price, usd_out, txid, confirmed, counterparties[0] if counterparties else "USD"])
 
     df = pd.DataFrame(data, columns=["Date", "Type", "BTC", "Price at Tx", "USD Value", "TXID", "Confirmed", "Counterparty"])
-    df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%Y")
-    df["Type"] = df["Type"].astype(str)
-    df["BTC"] = df["BTC"].astype(float)
-    df["Price at Tx"] = df["Price at Tx"].astype(float)
-    df["USD Value"] = df["USD Value"].astype(float)
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%Y")
+        df["Type"] = df["Type"].astype(str)
+        df["BTC"] = df["BTC"].astype(float)
+        df["Price at Tx"] = df["Price at Tx"].astype(float)
+        df["USD Value"] = df["USD Value"].astype(float)
     return df, total_btc_in, total_btc_out, total_usd_in, total_usd_out, first_tx_date
 
 # --- Bit Notes Storage Functions ---
@@ -347,20 +370,24 @@ def load_bit_notes():
             with open("bit_notes.json", "r") as f:
                 return json.load(f)
         return []
-    except:
+    except Exception as e:
+        logger.error(f"Error loading bit notes: {e}")
         return []
 
 def save_bit_notes(notes):
-    with open("bit_notes.json", "w") as f:
-        json.dump(notes, f, indent=4)
+    try:
+        with open("bit_notes.json", "w") as f:
+            json.dump(notes, f, indent=4)
+    except Exception as e:
+        logger.error(f"Error saving bit notes: {e}")
 
 # --- Main Dashboard ---
 currency_rates = get_currency_rates()
-multiplier = currency_rates.get(currency, 1.0)
+multiplier = currency_rates.get(currency.upper(), 1.0)
 
-if st.session_state.wallet_address:
+if st.session_state.get("wallet_address"):
     with st.container():
-        with st.spinner(t("Loading wallet insights...")):
+        with st.spinner(t("Loading transactions (last 20)...")):
             df, btc_in, btc_out, usd_in, usd_out, first_tx_date = get_wallet_stats(st.session_state.wallet_address)
             current_price_usd = get_current_btc_price()
 
@@ -372,7 +399,11 @@ if st.session_state.wallet_address:
             invested = net_usd * multiplier
             gain = wallet_value - invested
             gain_pct = (gain / invested) * 100 if invested != 0 else 0
-            avg_buy = invested / net_btc if net_btc != 0 else 0
+            avg_buy分的 = 0
+            if net_btc != 0:
+                avg_buy = invested / net_btc
+            else:
+                avg_buy = 0
 
             # Calculate additional metrics
             holding_period_days = (datetime.now(timezone.utc) - first_tx_date).days if first_tx_date else 0
