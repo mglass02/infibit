@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
+# Validate Stripe keys early
+if not STRIPE_PUBLISHABLE_KEY or not stripe.api_key:
+    logger.error("Stripe keys are not configured: Publishable=%s, Secret=%s",
+                 STRIPE_PUBLISHABLE_KEY, stripe.api_key[:4] + "****" if stripe.api_key else None)
+    raise ValueError("Stripe API keys are missing. Set STRIPE_PUBLISHABLE_KEY and STRIPE_SECRET_KEY in Streamlit Cloud Secrets.")
+
 # --- Page Configuration ---
 st.set_page_config(
     page_title="InfiBit | Bitcoin Wallet Dashboard",
@@ -267,7 +273,7 @@ st.markdown(
         }
     </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
 # --- Sidebar: Sign-Up and Login ---
@@ -277,7 +283,7 @@ with st.sidebar:
         <hr style='border-color: #E0E0E0; margin: 10px 0;'>
         <h3 style='color: #1A1A1A; font-family: Inter, sans-serif;'>InfiBit Analytics</h3>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
     tab_login, tab_signup = st.tabs([t("Login"), t("Sign Up")])
 
@@ -351,7 +357,7 @@ if st.session_state.user_email:
                 <p style='color: #4A4A4A; font-size: 1em;'>{0}</p>
             </div>
             """.format(t("Monitor your Bitcoin wallet with real-time insights")),
-            unsafe_allow_html=True,
+            unsafe_allow_html=True
         )
         with st.form("wallet_form"):
             wallet_input = st.text_input(
@@ -366,67 +372,62 @@ if st.session_state.user_email:
         st.markdown("</div>", unsafe_allow_html=True)
 
         # Paywall overlay with Stripe Checkout
-        if not STRIPE_PUBLISHABLE_KEY or not stripe.api_key:
-            logger.error("Stripe keys are not configured: Publishable=%s, Secret=%s", STRIPE_PUBLISHABLE_KEY, stripe.api_key[:4] + "****" if stripe.api_key else None)
-            st.error(t("Subscription system is unavailable due to missing configuration. Please contact support."))
-        else:
-            try:
-                # Create a Stripe Checkout Session
-                checkout_session = stripe.checkout.Session.create(
-                    payment_method_types=["card"],
-                    line_items=[
-                        {
-                            "price": "price_1RX6WDP91qk5UbUaXy5ZgtAC",  # Replace with your actual Stripe Price ID
-                            "quantity": 1,
-                        }
-                    ],
-                    mode="subscription",
-                    success_url="https://your-app-name.streamlit.app/?subscribed=true",  # Replace with your app's URL
-                    cancel_url="https://your-app-name.streamlit.app/?subscribed=false",
-                    client_reference_id=st.session_state.user_email,
-                )
-                st.markdown(
-                    f"""
-                    <div class='paywall-container'>
-                        <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-                        <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
-                        <a href="{checkout_session.url}" target="_blank">
-                            <button style='background-color: #007BFF; color: #FFFFFF; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;'>
-                                {t('Subscribe Now')}
-                            </button>
-                        </a>
-                        <p style='margin-top: 20px; color: #4A4A4A; font-size: 0.9em;'>{t('After subscribing, re-login to activate your account.')}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                logger.info(f"Stripe Checkout Session created successfully: {checkout_session.id}, URL: {checkout_session.url}")
-            except stripe.error.StripeError as e:
-                logger.error(f"Stripe error creating checkout session: {e}")
-                st.error(t("Failed to initialize payment. Please try again or contact support."))
-                st.markdown(
-                    f"""
-                    <div class='paywall-container'>
-                        <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-                        <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
-                        <p style='color: #DC3545; font-size: 0.9em;'>{t('Payment system error. Please contact support.')}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            except Exception as e:
-                logger.error(f"Unexpected error creating checkout session: {e}")
-                st.error(t("Unable to load subscription system. Please try again later or contact support."))
-                st.markdown(
-                    f"""
-                    <div class='paywall-container'>
-                        <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-                        <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
-                        <p style='color: #DC3545; font-size: 0.9em;'>{t('Subscription system is temporarily unavailable.')}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+        try:
+            checkout_session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                line_items=[
+                    {
+                        "price": "price_1RX6WDP91qk5UbUaXy5ZgtAC",  # Replace with your Stripe Price ID
+                        "quantity": 1,
+                    }
+                ],
+                mode="subscription",
+                success_url="https://your-app-name.streamlit.app/?subscribed=true",  # Replace with your app URL
+                cancel_url="https://your-app-name.streamlit.app/?subscribed=false",
+                client_reference_id=st.session_state.user_email,
+            )
+            st.markdown(
+                f"""
+                <div class='paywall-container'>
+                    <h2>{t('Subscribe to InfiBit Analytics')}</h2>
+                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
+                    <a href="{checkout_session.url}" target="_blank">
+                        <button style='background-color: #007BFF; color: #FFFFFF; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;'>
+                            {t('Subscribe Now')}
+                        </button>
+                    </a>
+                    <p style='margin-top: 20px; color: #4A4A4A; font-size: 0.9em;'>{t('After subscribing, re-login to activate your account.')}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            logger.info(f"Stripe Checkout Session created successfully: {checkout_session.id}, URL: {checkout_session.url}")
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error creating checkout session: {e}")
+            st.error(t("Failed to initialize payment. Please try again or contact support."))
+            st.markdown(
+                f"""
+                <div class='paywall-container'>
+                    <h2>{t('Subscribe to InfiBit Analytics')}</h2>
+                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
+                    <p style='color: #DC3545; font-size: 0.9em;'>{t('Payment system error. Please contact support.')}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error creating checkout session: {e}")
+            st.error(t("Unable to load subscription system. Please try again later or contact support."))
+            st.markdown(
+                f"""
+                <div class='paywall-container'>
+                    <h2>{t('Subscribe to InfiBit Analytics')}</h2>
+                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
+                    <p style='color: #DC3545; font-size: 0.9em;'>{t('Subscription system is temporarily unavailable.')}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
     else:
         # Render the full app for subscribed users
@@ -437,7 +438,7 @@ if st.session_state.user_email:
                 <p style='color: #4A4A4A; font-size: 1em;'>{0}</p>
             </div>
             """.format(t("Monitor your Bitcoin wallet with real-time insights")),
-            unsafe_allow_html=True,
+            unsafe_allow_html=True
         )
 
         # Wallet address input
@@ -917,7 +918,7 @@ if st.session_state.user_email:
         st.markdown(
             """
             <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
-                <hr style='border-color: #E0E0E0; margin: 10px 0;'>
+                <hr style='border-color: #E0E0E0; margin: 20px 0;'>
                 <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
             </div>
             """,
@@ -926,11 +927,15 @@ if st.session_state.user_email:
 
 else:
     st.markdown(
-    """
-    <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
-        <hr style='border-color: #E0E0E0; margin: 20px 0;'>
-        <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
-    </div>
-    """,
-    unsafe_allow_html=True
+        """
+        <div style='text-align: center; margin-top: 50px;'>
+            <h1>Welcome to Infi₿it Analytics</h1>
+            <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
+            <p style='color: #4A4A4A;'>{1}</p>
+        </div>
+        """.format(
+            t("Monitor your Bitcoin wallet with real-time insights"),
+            t("Please sign up or log in to access the dashboard.")
+        ),
+        unsafe_allow_html=True
     )
