@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # --- Stripe Configuration ---
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 
 # --- Page Configuration ---
 st.set_page_config(
