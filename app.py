@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 # --- Stripe Configuration ---
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_BUY_BUTTON_ID = "buy_btn_1RX6WDP91qk5UbUaXy5ZgtAC"
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -327,6 +327,12 @@ with st.sidebar:
 
     # Sidebar Controls (only for logged-in users)
     if st.session_state.user_email:
+        if st.button(t("Logout")):
+            st.session_state.user_email = None
+            st.session_state.subscribed = False
+            st.session_state.wallet_address = ""
+            st.session_state.subscription_checked = False
+            st.rerun()
         currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
         language = LANGUAGE_OPTIONS[language_label]
@@ -360,24 +366,69 @@ if st.session_state.user_email:
         
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Paywall overlay with Stripe Buy Button
-        st.markdown(
-            f"""
-            <div class='paywall-container'>
-                <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-                <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
-                <script async src="https://js.stripe.com/v3/buy-button.js"></script>
-                <stripe-buy-button
-                    buy-button-id="{STRIPE_BUY_BUTTON_ID}"
-                    publishable-key="{STRIPE_PUBLISHABLE_KEY}"
-                    client-reference-id="{st.session_state.user_email}"
-                >
-                </stripe-buy-button>
-                <p style='margin-top: 20px; color: #4A4A4A;'>{t('After subscribing, re-login to activate your account.')}</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        # Paywall overlay with Stripe Checkout
+        if not STRIPE_PUBLISHABLE_KEY or not STRIPE_SECRET_KEY:
+            logger.error("Stripe keys are not configured: Publishable=%s, Secret=%s", STRIPE_PUBLISHABLE_KEY, STRIPE_SECRET_KEY[:4] + "****" if STRIPE_SECRET_KEY else None)
+            st.error(t("Subscription system is unavailable due to missing configuration. Please contact support."))
+        else:
+            try:
+                # Create a Stripe Checkout Session
+                checkout_session = stripe.checkout.Session.create(
+                    payment_method_types=["card"],
+                    line_items=[
+                        {
+                            "price": "price_1RX6WDP91qk5UbUaXy5ZgtAC",  # Replace with your actual Stripe Price ID
+                            "quantity": 1,
+                        }
+                    ],
+                    mode="subscription",
+                    success_url="https://your-app-name.streamlit.app/?subscribed=true",  # Replace with your app's URL
+                    cancel_url="https://your-app-name.streamlit.app/?subscribed=false",
+                    client_reference_id=st.session_state.user_email,
+                )
+                st.markdown(
+                    f"""
+                    <div class='paywall-container'>
+                        <h2>{t('Subscribe to InfiBit Analytics')}</h2>
+                        <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
+                        <a href="{checkout_session.url}" target="_blank">
+                            <button style='background-color: #007BFF; color: #FFFFFF; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;'>
+                                {t('Subscribe Now')}
+                            </button>
+                        </a>
+                        <p style='margin-top: 20px; color: #4A4A4A; font-size: 0.9em;'>{t('After subscribing, re-login to activate your account.')}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                logger.info(f"Stripe Checkout Session created successfully: {checkout_session.id}, URL: {checkout_session.url}")
+            except stripe.error.StripeError as e:
+                logger.error(f"Stripe error creating checkout session: {e}")
+                st.error(t("Failed to initialize payment. Please try again or contact support."))
+                st.markdown(
+                    f"""
+                    <div class='paywall-container'>
+                        <h2>{t('Subscribe to InfiBit Analytics')}</h2>
+                        <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
+                        <p style='color: #DC3545; font-size: 0.9em;'>{t('Payment system error. Please contact support.')}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            except Exception as e:
+                logger.error(f"Unexpected error creating checkout session: {e}")
+                st.error(t("Unable to load subscription system. Please try again later or contact support."))
+                st.markdown(
+                    f"""
+                    <div class='paywall-container'>
+                        <h2>{t('Subscribe to InfiBit Analytics')}</h2>
+                        <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with a subscription.')}</p>
+                        <p style='color: #DC3545; font-size: 0.9em;'>{t('Subscription system is temporarily unavailable.')}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
     else:
         # Render the full app for subscribed users
         st.markdown(
@@ -666,7 +717,7 @@ if st.session_state.user_email:
                     with tab1:
                         st.markdown(f"### 💼 {t('Wallet Overview')}")
                         if tx_limit == "Last 20":
-                            st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions. Will take longer to load."))
+                            st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
                         col1, col2, col3, col4 = st.columns(4)
                         col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
                         col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
@@ -676,263 +727,215 @@ if st.session_state.user_email:
                         col5, col6, col7, col8 = st.columns(4)
                         col5.metric(f"{t('Average Buy Price')} ({currency})", f"{avg_buy:,.2f}", help=t("Average price paid per Bitcoin"))
                         col6.metric(f"{t('Total Invested')} ({currency})", f"{invested:,.2f}", help=t("Total amount invested"))
-                        col7.metric(t("Holding Period"), f"{int(holding_period_days)} days", help=t("Time since first transaction"))
-                        col8.metric(t("Wallet vs. Market"), f"{gain_pct - btc_return:.2f}%", help=t("Wallet ROI relative to Bitcoin market return"))
+                        col7.metric(t("Holding Period"), f"{holding_period_days} days", help=t("Days since first transaction"))
+                        col8.metric(t("Sharpe Ratio"), f"{sharpe_ratio:.2f}", help=t("Risk-adjusted return"))
 
                         st.markdown(f"### 📊 {t('Summary Metrics')}")
-                        summary_data = pd.DataFrame({
-                            t("Metric"): [t("Bitcoin Balance"), t("Current Value"), t("Total Invested"), t("Profit/Loss"), t("ROI"), t("Volatility")],
-                            t("Value"): [f"{net_btc:.8f} BTC", f"{wallet_value:,.2f} {currency}", f"{invested:,.2f} {currency}", f"{gain:,.2f} {currency}", f"{gain_pct:.2f}%", f"{volatility:.2f}%"]
-                        })
-                        st.dataframe(summary_data, use_container_width=True, hide_index=True)
+                        summary_data = {
+                            t("Metric"): [
+                                t("Bitcoin Balance"),
+                                t("Current Value"),
+                                t("Total Invested"),
+                                t("Profit/Loss"),
+                                t("ROI"),
+                                t("Volatility"),
+                                t("Sharpe Ratio")
+                            ],
+                            t("Value"): [
+                                f"{net_btc:.8f} BTC",
+                                f"{currency} {wallet_value:,.2f}",
+                                f"{currency} {invested:,.2f}",
+                                f"{currency} {gain:,.2f}",
+                                f"{gain_pct:.2f}%",
+                                f"{volatility:.2f}%",
+                                f"{sharpe_ratio:.2f}"
+                            ]
+                        }
+                        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
 
                     # --- Transactions Tab ---
                     with tab2:
                         st.markdown(f"### 📜 {t('Transaction History')}")
                         df_display = df.copy()
-                        df_display["Value (" + currency + ")"] = df_display["USD Value"] * multiplier
+                        df_display["USD Value"] = df_display["USD Value"] * multiplier
                         df_display["Price at Tx"] = df_display["Price at Tx"] * multiplier
                         df_display["Date"] = df_display["Date"].dt.strftime("%Y-%m-%d")
 
                         date_range = st.date_input(
-                            t("Filter by Date"),
-                            [pd.to_datetime(df_display["Date"]).min(), pd.to_datetime(df_display["Date"]).max()],
-                            min_value=pd.to_datetime(df_display["Date"]).min(),
-                            max_value=pd.to_datetime(df_display["Date"]).max(),
-                            key="date_filter",
+                            t("Filter by Date Range"),
+                            [df["Date"].min(), df["Date"].max()],
+                            min_value=df["Date"].min(),
+                            max_value=df["Date"].max(),
+                            key="date_range"
                         )
 
                         filtered_df = df_display[
-                            (df_display["Date"] >= str(date_range[0]))
-                            & (df_display["Date"] <= str(date_range[1]))
+                            (df_display["Date"] >= date_range[0].strftime("%Y-%m-%d")) &
+                            (df_display["Date"] <= date_range[1].strftime("%Y-%m-%d"))
                         ]
 
                         st.dataframe(
-                            filtered_df[["Date", "Type", "BTC", "Price at Tx", "Value (" + currency + ")", "TXID", "Confirmed", "Counterparty"]].sort_values("Date", ascending=False),
-                            use_container_width=True,
-                            column_config={
-                                "Date": t("Date"),
-                                "Type": t("Type"),
-                                "BTC": t("Amount (BTC)"),
-                                "Price at Tx": t(f"Price ({currency})"),
-                                "Value (" + currency + ")": t(f"Value ({currency})"),
-                                "TXID": t("Transaction ID"),
-                                "Confirmed": t("Confirmed"),
-                                "Counterparty": t("Counterparty Address"),
-                            },
-                            hide_index=True,
+                            filtered_df[["Date", "Type", "BTC", "USD Value", "Price at Tx", "TXID", "Confirmed", "Counterparty"]],
+                            use_container_width=True
                         )
 
                         csv = filtered_df.to_csv(index=False)
                         st.download_button(
-                            t("Download Transactions"),
+                            t("Download Transactions as CSV"),
                             csv,
-                            "transactions_data.csv",
+                            "transactions.csv",
                             "text/csv",
-                            key="download-csv",
+                            key="download_transactions"
                         )
 
                         st.markdown(f"### 📊 {t('Transaction Volume')}")
-                        volume_df = (
-                            filtered_df.groupby(["Date", "Type"])["BTC"]
-                            .sum()
-                            .unstack()
-                            .fillna(0)
-                            .reset_index()
-                        )
-                        fig = go.Figure()
-                        fig.add_trace(
+                        volume_df = filtered_df.groupby("Date")["BTC"].sum().reset_index()
+                        fig_volume = go.Figure()
+                        fig_volume.add_trace(
                             go.Bar(
                                 x=volume_df["Date"],
-                                y=volume_df.get("IN", pd.Series(0)),
-                                name=t("Received"),
-                                marker_color="#28A745",
+                                y=volume_df["BTC"],
+                                name=t("BTC Volume"),
+                                marker_color="#007BFF"
                             )
                         )
-                        fig.add_trace(
-                            go.Bar(
-                                x=volume_df["Date"],
-                                y=volume_df.get("OUT", pd.Series(0)) * -1,
-                                name=t("Sent"),
-                                marker_color="#DC3545",
-                            )
-                        )
-                        fig.update_layout(
-                            barmode="relative",
-                            title=t("BTC Sent and Received"),
+                        fig_volume.update_layout(
+                            title=t("Transaction Volume Over Time"),
                             xaxis_title=t("Date"),
-                            yaxis_title=t("Amount (BTC)"),
-                            template="plotly_white",
-                            plot_bgcolor="rgba(0,0,0,0)",
-                            height=400,
-                            font=dict(family="Inter", size=12),
+                            yaxis_title=t("BTC"),
+                            template="plotly_white"
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig_volume, use_container_width=True)
 
                         st.markdown(f"### 📈 {t('Transaction Frequency')}")
-                        freq_df = filtered_df.groupby([pd.to_datetime(filtered_df["Date"]).dt.to_period("M"), "Type"]).size().unstack().fillna(0).reset_index()
-                        freq_df["Date"] = freq_df["Date"].apply(lambda x: x.strftime('%Y-%m'))
-                        fig = go.Figure()
-                        for t_type in ["IN", "OUT"]:
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=freq_df["Date"],
-                                    y=freq_df.get(t_type, pd.Series(0)),
-                                    name=t("Received" if t_type == "IN" else "Sent"),
-                                    line=dict(color="#28A745" if t_type == "IN" else "#DC3545"),
-                                    mode="lines+markers",
-                                )
+                        freq_df = filtered_df.groupby("Date")["TXID"].count().reset_index()
+                        fig_freq = go.Figure()
+                        fig_freq.add_trace(
+                            go.Scatter(
+                                x=freq_df["Date"],
+                                y=freq_df["TXID"],
+                                mode="lines+markers",
+                                name=t("Transaction Count"),
+                                line=dict(color="#007BFF")
                             )
-                        fig.update_layout(
-                            title=t("Monthly Transaction Count"),
-                            xaxis_title=t("Month"),
+                        )
+                        fig_freq.update_layout(
+                            title=t("Transaction Frequency Over Time"),
+                            xaxis_title=t("Date"),
                             yaxis_title=t("Number of Transactions"),
-                            template="plotly_white",
-                            plot_bgcolor="rgba(0,0,0,0)",
-                            height=400,
-                            font=dict(family="Inter", size=12),
+                            template="plotly_white"
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig_freq, use_container_width=True)
 
-                        st.markdown(f"### 📊 {t('Transaction Statistics')}")
-                        avg_btc_in = filtered_df[filtered_df["Type"] == "IN"]["BTC"].mean() if not filtered_df[filtered_df["Type"] == "IN"].empty else 0
-                        avg_btc_out = filtered_df[filtered_df["Type"] == "OUT"]["BTC"].mean() if not filtered_df[filtered_df["Type"] == "OUT"].empty else 0
-                        avg_value_in = filtered_df[filtered_df["Type"] == "IN"]["Value (" + currency + ")"].mean() if not filtered_df[filtered_df["Type"] == "IN"].empty else 0
-                        avg_value_out = filtered_df[filtered_df["Type"] == "OUT"]["Value (" + currency + ")"].mean() if not filtered_df[filtered_df["Type"] == "OUT"].empty else 0
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.metric(t("Avg. Received (BTC)"), f"{avg_btc_in:.8f}", help=t("Average BTC per incoming transaction"))
-                        col2.metric(t("Avg. Sent (BTC)"), f"{avg_btc_out:.8f}", help=t("Average BTC per outgoing transaction"))
-                        col3.metric(t(f"Avg. Received ({currency})"), f"{avg_value_in:,.2f}", help=t("Average value per incoming transaction"))
-                        col4.metric(t(f"Avg. Sent ({currency})"), f"{avg_value_out:,.2f}", help=t("Average value per outgoing transaction"))
-
-                        st.markdown(f"### 🤝 {t('Top Counterparties')}")
-                        counterparty_df = filtered_df.groupby("Counterparty")["BTC"].sum().reset_index().sort_values("BTC", ascending=False).head(5)
-                        counterparty_df["BTC"] = counterparty_df["BTC"].abs()
-                        st.dataframe(
-                            counterparty_df,
-                            use_container_width=True,
-                            column_config={
-                                "Counterparty": t("Address"),
-                                "BTC": t("Total BTC Transacted"),
-                            },
-                            hide_index=True,
-                        )
+                        st.markdown(f"### 📉 {t('Transaction Statistics')}")
+                        col1, col2 = st.columns(2)
+                        col1.metric(t("Average BTC per Tx"), f"{filtered_df['BTC'].mean():.8f} BTC", help=t("Average BTC per transaction"))
+                        col2.metric(f"{t('Average USD per Tx')} ({currency})", f"{filtered_df['USD Value'].mean():,.2f}", help=t("Average USD value per transaction"))
 
                     # --- Portfolio Tab ---
                     with tab3:
                         st.markdown(f"### 📈 {t('Portfolio Performance')}")
-                        fig = go.Figure()
-                        fig.add_trace(
+                        fig_portfolio = go.Figure()
+                        fig_portfolio.add_trace(
                             go.Scatter(
                                 x=value_df["Date"],
                                 y=value_df["Market Value"],
                                 name=t("Market Value"),
-                                line=dict(color="#007BFF"),
-                                fill="tozeroy",
+                                line=dict(color="#007BFF")
                             )
                         )
-                        fig.add_trace(
+                        fig_portfolio.add_trace(
                             go.Scatter(
                                 x=value_df["Date"],
                                 y=value_df["Cost Basis"],
                                 name=t("Cost Basis"),
-                                line=dict(color="#6C757D", dash="dash"),
+                                line=dict(color="#FF5733")
                             )
                         )
-                        fig.update_layout(
+                        fig_portfolio.update_layout(
                             title=t("Portfolio Value vs. Cost Basis"),
                             xaxis_title=t("Date"),
-                            yaxis_title=currency,
-                            template="plotly_white",
-                            plot_bgcolor="rgba(0,0,0,0)",
-                            height=400,
-                            font=dict(family="Inter", size=12),
+                            yaxis_title=f"{currency}",
+                            template="plotly_white"
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig_portfolio, use_container_width=True)
 
-                        st.markdown(f"### 📊 {t('Performance Summary')}")
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Percentage return based on current value vs. invested amount"))
-                        col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Latest market price of Bitcoin"))
-                        col3.metric(t("Sharpe Ratio"), f"{sharpe_ratio:.2f}", help=t("Risk-adjusted return (annualized)"))
-                        col4.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Largest peak-to-trough decline"))
-
-                        st.markdown(f"### 🔮 {t('Portfolio Scenarios')}")
-                        scenario_data = []
-                        for change in [-20, -10, 0, 10, 20]:
-                            scenario_price = current_price * (1 + change / 100)
-                            scenario_value = net_btc * scenario_price
-                            scenario_data.append({
-                                t("BTC Price Change"): f"{change:+.0f}%",
-                                t(f"Portfolio Value ({currency})"): f"{scenario_value:,.2f}"
-                            })
-                        st.dataframe(
-                            pd.DataFrame(scenario_data),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
+                        st.markdown(f"### 📊 {t('Performance Metrics')}")
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Return on investment"))
+                        col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Current market price of Bitcoin"))
+                        col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
 
                     # --- Bit Notes Tab ---
                     with tab4:
                         st.markdown(f"### 📝 {t('₿it Notes')}")
-                        st.markdown(t("Share your insights on Bitcoin and read notes from other users. Add your Bit Note below!"))
+                        st.write(t("Share your thoughts on Bitcoin or track your investment notes."))
 
-                        with st.form("bit_note_form"):
-                            st.subheader(t("Add ₿it Note"))
-                            title = st.text_input(t("Title"), max_chars=100)
-                            description = st.text_area(t("Description"), max_chars=500)
-                            article_text = st.text_area(t("₿it Note Text"), max_chars=1000)
-                            submitted = st.form_submit_button(t("Submit ₿it Note"))
-
-                            if submitted:
-                                if title and description and article_text:
-                                    bit_notes = load_bit_notes()
-                                    new_note = {
-                                        "title": title,
-                                        "description": description,
-                                        "article_text": article_text,
-                                        "date_posted": datetime.now(timezone.utc).isoformat(),
+                        with st.form("bit_notes_form"):
+                            st.subheader(t("Add a New Note"))
+                            note_title = st.text_input(t("Note Title"), max_chars=100)
+                            note_description = st.text_area(t("Description"), max_chars=500)
+                            note_content = st.text_area(t("Note Content"), max_chars=1000)
+                            note_submitted = st.form_submit_button(t("Submit Note"))
+                            if note_submitted:
+                                if note_title and note_description and note_content:
+                                    notes = load_bit_notes()
+                                    notes.append({
+                                        "title": note_title,
+                                        "description": note_description,
+                                        "content": note_content,
+                                        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                                         "author": st.session_state.user_email
-                                    }
-                                    bit_notes.append(new_note)
-                                    save_bit_notes(bit_notes)
-                                    st.success(t("Bit Note added successfully!"))
+                                    })
+                                    save_bit_notes(notes)
+                                    st.success(t("Note added successfully!"))
                                 else:
                                     st.error(t("Please fill out all fields."))
 
-                        st.markdown(f"### {t('All ₿it Notes')}")
-                        bit_notes = load_bit_notes()
-                        if bit_notes:
-                            bit_notes = sorted(bit_notes, key=lambda x: x["date_posted"], reverse=True)
-                            for note in bit_notes:
-                                date_posted = datetime.fromisoformat(note["date_posted"]).strftime("%Y-%m-%d %H:%M:%S UTC")
-                                with st.expander(f"{t(note['title'])} ({date_posted})"):
-                                    st.markdown(
-                                        f"""
-                                        <div style='padding: 10px; border-bottom: 1px solid #E0E0E0;'>
-                                            <h4 style='margin: 5px 0;'>{t(note['title'])}</h4>
-                                            <p style='color: #4A4A4A;'>{t(note['description'])}</p>
-                                            <p><strong>{t('Notes Text')}:</strong> {t(note['article_text'])}</p>
-                                            <p><strong>{t('Posted')}:</strong> {date_posted}</p>
-                                            <p><strong>{t('Author')}:</strong> {note.get('author', 'Anonymous')}</p>
-                                        </div>
-                                        """,
-                                        unsafe_allow_html=True,
-                                    )
+                        st.markdown(f"### 📚 {t('Your Notes')}")
+                        notes = load_bit_notes()
+                        if notes:
+                            for note in notes:
+                                st.markdown(
+                                    f"""
+                                    <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 10px;'>
+                                        <h4>{note['title']}</h4>
+                                        <p><strong>{t('Description')}:</strong> {note['description']}</p>
+                                        <p><strong>{t('Content')}:</strong> {note['content']}</p>
+                                        <p><strong>{t('Date')}:</strong> {note['date']}</p>
+                                        <p><strong>{t('Author')}:</strong> {note['author']}</p>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
                         else:
-                            st.info(t("No ₿it Notes available yet. Be the first to add one!"))
-        else:
-            st.info(t("Please enter a valid Bitcoin wallet address to view the dashboard."))
-else:
-    st.info(t("Please log in or sign up to access the dashboard."))
+                            st.info(t("No notes yet. Add your first note above!"))
 
-# --- Footer ---
-st.markdown(
-    """
-    <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
-        <hr style='border-color: #E0E0E0; margin: 20px 0;'>
-        <p style='color: #4A4A4A; font-size: 14px; margin: 0;'>© 2025 Infi₿it Analytics</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+        else:
+            st.warning(t("Please enter a Bitcoin wallet address to view insights."))
+
+        # --- Footer ---
+        st.markdown(
+            """
+            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
+                <hr style='border-color: #E0E0E0; margin: 10px 0;'>
+                <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+else:
+    st.markdown(
+        """
+        <div style='text-align: center; margin-top: 50px;'>
+            <h1>Welcome to Infi₿it Analytics</h1>
+            <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
+            <p style='color: #4A4A4A;'>{1}</p>
+        </div>
+        """.format(
+            t("Monitor your Bitcoin wallet with real-time insights"),
+            t("Please sign up or log in to access the dashboard.")
+        ),
+        unsafe_allow_html=True
+    )
