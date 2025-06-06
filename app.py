@@ -377,7 +377,7 @@ if st.session_state.user_email:
                 payment_method_types=["card"],
                 line_items=[
                     {
-                        "price": "price_1RX6WDP91qk5UbUaXy5ZgtAC",  # Replace with your Stripe Price ID
+                        "price": "price_1RX6SQP91qk5UbUa0oV14iLB",  # Replace with your Stripe Price ID
                         "quantity": 1,
                     }
                 ],
