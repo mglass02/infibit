@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # --- Stripe Configuration ---
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -366,8 +366,8 @@ if st.session_state.user_email:
         st.markdown("</div>", unsafe_allow_html=True)
 
         # Paywall overlay with Stripe Checkout
-        if not STRIPE_PUBLISHABLE_KEY or not STRIPE_SECRET_KEY:
-            logger.error("Stripe keys are not configured: Publishable=%s, Secret=%s", STRIPE_PUBLISHABLE_KEY, STRIPE_SECRET_KEY[:4] + "****" if STRIPE_SECRET_KEY else None)
+        if not STRIPE_PUBLISHABLE_KEY or not stripe.api_key:
+            logger.error("Stripe keys are not configured: Publishable=%s, Secret=%s", STRIPE_PUBLISHABLE_KEY, stripe.api_key[:4] + "****" if stripe.api_key else None)
             st.error(t("Subscription system is unavailable due to missing configuration. Please contact support."))
         else:
             try:
