@@ -484,7 +484,7 @@ if st.session_state.get("wallet_address"):
             with tab1:
                 st.markdown(f"### 💼 {t('Wallet Overview')}")
                 if tx_limit == "Last 20":
-                    st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
+                    st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions. Will take longer to load."))
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
                 col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
@@ -708,7 +708,7 @@ if st.session_state.get("wallet_address"):
                     title = st.text_input(t("Title"), max_chars=100)
                     description = st.text_area(t("Description"), max_chars=500)
                     article_text = st.text_area(t("₿it Note Text"), max_chars=100)
-                    submitted = st.form_submit_button(t("Submit Bit Note"))
+                    submitted = st.form_submit_button(t("Submit ₿it Note"))
 
                     if submitted:
                         if title and description and article_text:
