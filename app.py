@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import time
 import numpy as np
 from deep_translator import GoogleTranslator
@@ -46,6 +46,19 @@ LANGUAGE_OPTIONS = {
     "Polish 🇵🇱": "pl",
     "Portuguese 🇵🇹": "pt",
 }
+
+# --- Default Language ---
+language = "en"  # Default to English
+
+# --- Translate Function ---
+def t(text):
+    if language == "en":
+        return text
+    try:
+        return GoogleTranslator(source="en", target=language).translate(text)
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        return text
 
 # --- User Data Management ---
 def load_users():
@@ -122,7 +135,7 @@ st.markdown(
         }
         .blur-overlay {
             filter: blur(8px);
-            pointer-events: none; /* Prevent interaction with blurred content */
+            pointer-events: none;
             opacity: 0.6;
         }
         .paywall-container {
@@ -296,7 +309,7 @@ with st.sidebar:
         if st.button(t("Sign Up")):
             if new_email and new_wallet and new_password:
                 if not validate_wallet_address(new_wallet):
-                    st.error(t("Please enter a valid Bitcoin address (starting with 'bc1', '1', or '3', 26–62 characters)."))
+                    st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
                 else:
                     users = load_users()
                     if new_email in users:
@@ -319,20 +332,10 @@ with st.sidebar:
         language = LANGUAGE_OPTIONS[language_label]
         tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"))
 
-# --- Translate Function ---
-def t(text):
-    if language == "en":
-        return text
-    try:
-        return GoogleTranslator(source='en', target=language).translate(text)
-    except Exception as e:
-        logger.error(f"Translation error: {e}")
-        return text
-
 # --- Main App Logic ---
 if st.session_state.user_email:
     if not st.session_state.subscribed:
-        # Apply blur to the main content
+        # Apply blur to main content
         st.markdown("<div class='blur-overlay'>", unsafe_allow_html=True)
         
         # Render placeholder content (blurred)
@@ -404,7 +407,8 @@ if st.session_state.user_email:
                     save_users(users)
                     st.success(t("Wallet address updated successfully!"))
                 else:
-                    st.error(t("Please enter a valid Bitcoin address (starting with 'bc1', '1', or '3', 26–62 characters)."))
+                    st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
+                    users = load_users()
                     st.session_state.wallet_address = users.get(st.session_state.user_email, {}).get("wallet_address", "")
 
         # --- Constants ---
@@ -450,7 +454,7 @@ if st.session_state.user_email:
                 spent = stats.get("spent_txo_sum", 0)
                 balance = (funded - spent) / 1e8  # Convert satoshis to BTC
                 logger.info(f"Balance for {address}: {balance:.8f} BTC")
-                return max(balance, 0)  # Ensure non-negative balance
+                return max(balance, 0)
             except Exception as e:
                 logger.error(f"Error fetching balance for {address}: {e}")
                 st.error(t("Failed to fetch wallet balance."))
@@ -551,7 +555,9 @@ if st.session_state.user_email:
                 btc_price = get_historical_price(date_str)
                 confirmed = detail.get("status", {}).get("confirmed", False)
 
+                # Calculate BTC received (outputs to address)
                 btc_in = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
+                # Calculate BTC spent (inputs from address, excluding change)
                 btc_out = 0
                 for vin in detail.get("vin", []):
                     prevout = vin.get("prevout", {})
@@ -559,6 +565,7 @@ if st.session_state.user_email:
                         input_value = prevout.get("value", 0) / 1e8
                         change_value = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
                         btc_out += max(0, input_value - change_value)
+                # Counterparties
                 counterparties = [vin.get("prevout", {}).get("scriptpubkey_address") for vin in detail.get("vin", []) if vin.get("prevout", {}).get("scriptpubkey_address") != address] or \
                                  [v.get("scriptpubkey_address") for v in detail.get("vout", []) if v.get("scriptpubkey_address") != address]
                 counterparty = counterparties[0] if counterparties else "N/A"
@@ -874,7 +881,7 @@ if st.session_state.user_email:
                             st.subheader(t("Add ₿it Note"))
                             title = st.text_input(t("Title"), max_chars=100)
                             description = st.text_area(t("Description"), max_chars=500)
-                            article_text = st.text_area(t("₿it Note Text"), max_chars=100)
+                            article_text = st.text_area(t("₿it Note Text"), max_chars=1000)
                             submitted = st.form_submit_button(t("Submit ₿it Note"))
 
                             if submitted:
@@ -914,6 +921,8 @@ if st.session_state.user_email:
                                     )
                         else:
                             st.info(t("No ₿it Notes available yet. Be the first to add one!"))
+        else:
+            st.info(t("Please enter a valid Bitcoin wallet address to view the dashboard."))
 else:
     st.info(t("Please log in or sign up to access the dashboard."))
 
@@ -922,10 +931,11 @@ st.markdown(
     """
     <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
         <hr style='border-color: #E0E0E0; margin: 20px 0;'>
-        <p style='color: #4A4A4A; font-size: 0.9em;'>
-            © 2025 Infi₿it Analytics
-        </p>
-    </div>
+            <p style='color: #4A4A4A; font-size: 0.9em;'>
+                © <p style='color: #4A4A4A; font-size: 14px; margin: 0px'>© 2025 Infi₿it Analytics</p>
+            </p>
+        </div>
     """,
-    unsafe_allow_html=True,
+    unsafe_html=True,
+    unsafe_allow_html=True
 )
