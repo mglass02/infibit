@@ -926,15 +926,11 @@ if st.session_state.user_email:
 
 else:
     st.markdown(
-        """
-        <div style='text-align: center; margin-top: 50px;'>
-            <h1>Welcome to Infi₿it Analytics</h1>
-            <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
-            <p style='color: #4A4A4A;'>{1}</p>
-        </div>
-        """.format(
-            t("Monitor your Bitcoin wallet with real-time insights"),
-            t("Please sign up or log in to access the dashboard.")
-        ),
-        unsafe_allow_html=True
+    """
+    <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
+        <hr style='border-color: #E0E0E0; margin: 20px 0;'>
+        <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
+    </div>
+    """,
+    unsafe_allow_html=True
     )
