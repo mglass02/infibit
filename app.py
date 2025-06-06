@@ -931,11 +931,8 @@ st.markdown(
     """
     <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
         <hr style='border-color: #E0E0E0; margin: 20px 0;'>
-            <p style='color: #4A4A4A; font-size: 0.9em;'>
-                © <p style='color: #4A4A4A; font-size: 14px; margin: 0px'>© 2025 Infi₿it Analytics</p>
-            </p>
-        </div>
+        <p style='color: #4A4A4A; font-size: 14px; margin: 0;'>© 2025 Infi₿it Analytics</p>
+    </div>
     """,
-    unsafe_html=True,
     unsafe_allow_html=True
 )
