@@ -48,6 +48,7 @@ with st.sidebar:
     currency = st.selectbox("💱 Currency", options=["USD", "GBP", "EUR"], index=0, key="currency_select")
     language_label = st.selectbox("🌐 Language", options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
     language = LANGUAGE_OPTIONS[language_label]
+    tx_limit = st.selectbox("📜 Transaction Limit", ["Last 20", "All"], index=0, help="Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)")
 
 # --- Translate Function ---
 def t(text):
@@ -55,16 +56,16 @@ def t(text):
         return text
     try:
         return GoogleTranslator(source='en', target=language).translate(text)
-    except:
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
         return text
 
 # --- Wallet Address Validation ---
 def validate_wallet_address(address):
-    # Supports bc1 (SegWit), 1 (Legacy), 3 (P2SH) addresses, 26–62 characters
     pattern = r'^(bc1|[13])[a-zA-Z0-9]{25,61}$'
     return re.match(pattern, address) is not None
 
-# --- Global CSS for Professional Styling ---
+# --- Global CSS ---
 st.markdown(
     """
     <style>
@@ -138,14 +139,14 @@ st.markdown(
         }
         .stDataFrame th {
             background-color: #F5F6F5;
-            color: white;
+            color: #1A1A1A;
             padding: 12px;
             text-align: left;
             font-weight: 600;
         }
         .stDataFrame td {
             padding: 12px;
-            border-bottom: 1px solid #E0E0E0
+            border-bottom: 1px solid #E0E0E0;
         }
         .stDataFrame tr:nth-child(even) {
             background-color: #FAFAFA;
@@ -203,7 +204,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Initialize session state for wallet address
+# Initialize session state
 if "wallet_address" not in st.session_state:
     st.session_state.wallet_address = ""
 
@@ -232,7 +233,7 @@ price_cache = {}
 def get_current_btc_price():
     url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         return response.json().get("bitcoin", {}).get("usd", 0)
     except Exception as e:
@@ -243,11 +244,11 @@ def get_current_btc_price():
 def get_historical_price(date_str):
     if date_str in price_cache:
         return price_cache[date_str]
-    dt = datetime.strptime(date_str, '%d-%m-%Y')
-    ts = int(dt.replace(tzinfo=timezone.utc).timestamp())
-    url = f"https://min-api.cryptocompare.com/data/pricehistorical?fsym=BTC&tsyms=USD&ts={ts}"
     try:
-        response = requests.get(url)
+        dt = datetime.strptime(date_str, '%d-%m-%Y')
+        ts = int(dt.replace(tzinfo=timezone.utc).timestamp())
+        url = f"https://min-api.cryptocompare.com/data/pricehistorical?fsym=BTC&tsyms=USD&ts={ts}"
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         price = response.json().get("BTC", {}).get("USD", 0)
         price_cache[date_str] = price
@@ -257,20 +258,50 @@ def get_historical_price(date_str):
         return 0
 
 @st.cache_data(ttl=3600)
+def get_wallet_balance(address):
+    url = f"https://blockstream.info/api/address/{address}"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        stats = response.json().get("chain_stats", {})
+        funded = stats.get("funded_txo_sum", 0)
+        spent = stats.get("spent_txo_sum", 0)
+        balance = (funded - spent) / 1e8  # Convert satoshis to BTC
+        logger.info(f"Balance for {address}: {balance:.8f} BTC")
+        return max(balance, 0)  # Ensure non-negative balance
+    except Exception as e:
+        logger.error(f"Error fetching balance for {address}: {e}")
+        st.error(t("Failed to fetch wallet balance."))
+        return 0
+
+@st.cache_data(ttl=3600)
 def get_txs_all(address):
     all_txs = []
     url = f"https://blockstream.info/api/address/{address}/txs"
     try:
         logger.info(f"Fetching transactions for address: {address}")
-        response = requests.get(url)
-        response.raise_for_status()
-        txs = response.json()
-        if not txs:
+        if tx_limit == "Last 20":
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            txs = response.json()
+            all_txs.extend(txs[:20])
+            logger.info(f"Fetched {len(all_txs)} transactions (limited to 20)")
+        else:
+            while True:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                txs = response.json()
+                if not txs:
+                    break
+                all_txs.extend(txs)
+                if len(txs) < 25:
+                    break
+                last_txid = txs[-1]['txid']
+                url = f"https://blockstream.info/api/address/{address}/txs/chain/{last_txid}"
+                time.sleep(1)  # Respect rate limits
+            logger.info(f"Fetched {len(all_txs)} transactions (all)")
+        if not all_txs:
             logger.warning(f"No transactions found for address: {address}")
-            return []
-        # Limit to the most recent 20 transactions
-        all_txs.extend(txs[:20])
-        logger.info(f"Fetched {len(all_txs)} transactions for address: {address}")
         return all_txs
     except Exception as e:
         logger.error(f"Error fetching transactions for {address}: {e}")
@@ -281,7 +312,7 @@ def get_txs_all(address):
 def get_tx_details(txid):
     url = f"https://blockstream.info/api/tx/{txid}"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -292,7 +323,7 @@ def get_tx_details(txid):
 def get_btc_historical_prices(days=30):
     url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days={days}"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         prices = response.json().get("prices", [])
         return pd.DataFrame(prices, columns=["timestamp", "price"]).assign(
@@ -302,12 +333,11 @@ def get_btc_historical_prices(days=30):
         logger.error(f"Error fetching historical BTC prices: {e}")
         return pd.DataFrame()
 
-# --- Currency Rates from Frankfurter API ---
 @st.cache_data(ttl=900)
 def get_currency_rates():
     url = "https://api.frankfurter.app/latest?from=USD&to=USD,GBP,EUR"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         rates = data.get("rates", {})
@@ -329,6 +359,7 @@ def get_wallet_stats(address):
         txid = tx.get("txid")
         detail = get_tx_details(txid)
         if not detail:
+            logger.warning(f"No details for txid: {txid}")
             continue
         ts = detail.get("status", {}).get("block_time", int(time.time()))
         date = datetime.fromtimestamp(ts, tz=timezone.utc)
@@ -338,21 +369,34 @@ def get_wallet_stats(address):
         btc_price = get_historical_price(date_str)
         confirmed = detail.get("status", {}).get("confirmed", False)
 
+        # Calculate BTC received (outputs to address)
         btc_in = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
-        btc_out = sum(vin.get("prevout", {}).get("value", 0) for vin in detail.get("vin", []) if vin.get("prevout", {}).get("scriptpubkey_address") == address) / 1e8
+        # Calculate BTC spent (inputs from address, excluding change)
+        btc_out = 0
+        for vin in detail.get("vin", []):
+            prevout = vin.get("prevout", {})
+            if prevout.get("scriptpubkey_address") == address:
+                input_value = prevout.get("value", 0) / 1e8
+                # Check if this input's value is sent back as change
+                change_value = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
+                btc_out += max(0, input_value - change_value)  # Only count net spent
+        # Counterparties
         counterparties = [vin.get("prevout", {}).get("scriptpubkey_address") for vin in detail.get("vin", []) if vin.get("prevout", {}).get("scriptpubkey_address") != address] or \
                          [v.get("scriptpubkey_address") for v in detail.get("vout", []) if v.get("scriptpubkey_address") != address]
+        counterparty = counterparties[0] if counterparties else "N/A"
 
         if btc_in > 0:
             usd_in = btc_in * btc_price
             total_btc_in += btc_in
             total_usd_in += usd_in
-            data.append([date_str, "IN", btc_in, btc_price, usd_in, txid, confirmed, counterparties[0] if counterparties else "N/A"])
+            data.append([date_str, "IN", btc_in, btc_price, usd_in, txid, confirmed, counterparty])
         if btc_out > 0:
             usd_out = btc_out * btc_price
             total_btc_out += btc_out
             total_usd_out += usd_out
-            data.append([date_str, "OUT", btc_out, btc_price, usd_out, txid, confirmed, counterparties[0] if counterparties else "USD"])
+            data.append([date_str, "OUT", btc_out, btc_price, usd_out, txid, confirmed, counterparty])
+
+        logger.debug(f"Tx {txid}: IN={btc_in:.8f}, OUT={btc_out:.8f}, Price={btc_price}")
 
     df = pd.DataFrame(data, columns=["Date", "Type", "BTC", "Price at Tx", "USD Value", "TXID", "Confirmed", "Counterparty"])
     if not df.empty:
@@ -361,6 +405,9 @@ def get_wallet_stats(address):
         df["BTC"] = df["BTC"].astype(float)
         df["Price at Tx"] = df["Price at Tx"].astype(float)
         df["USD Value"] = df["USD Value"].astype(float)
+    else:
+        logger.warning(f"No transaction data for address: {address}")
+
     return df, total_btc_in, total_btc_out, total_usd_in, total_usd_out, first_tx_date
 
 # --- Bit Notes Storage Functions ---
@@ -387,23 +434,29 @@ multiplier = currency_rates.get(currency.upper(), 1.0)
 
 if st.session_state.get("wallet_address"):
     with st.container():
-        with st.spinner(t("Loading transactions (last 20)...")):
+        with st.spinner(t("Loading wallet insights...")):
             df, btc_in, btc_out, usd_in, usd_out, first_tx_date = get_wallet_stats(st.session_state.wallet_address)
             current_price_usd = get_current_btc_price()
+            # Get true balance from Blockstream API
+            net_btc = get_wallet_balance(st.session_state.wallet_address)
 
             current_price = current_price_usd * multiplier
-            net_btc = btc_in - btc_out
             net_usd = usd_in - usd_out
             wallet_value_usd = net_btc * current_price_usd
             wallet_value = wallet_value_usd * multiplier
-            invested = net_usd * multiplier
+            invested = net_usd * multiplier if net_usd > 0 else wallet_value
             gain = wallet_value - invested
             gain_pct = (gain / invested) * 100 if invested != 0 else 0
-            avg_buy分的 = 0
-            if net_btc != 0:
-                avg_buy = invested / net_btc
-            else:
-                avg_buy = 0
+            avg_buy = invested / net_btc if net_btc != 0 else 0
+
+            # Validate balance
+            if net_btc < 0:
+                logger.error(f"Negative balance detected: {net_btc:.8f} BTC")
+                st.error(t("Error: Negative balance detected. Please try fetching all transactions."))
+                net_btc = 0
+                wallet_value = 0
+                gain = 0
+                gain_pct = 0
 
             # Calculate additional metrics
             holding_period_days = (datetime.now(timezone.utc) - first_tx_date).days if first_tx_date else 0
@@ -430,6 +483,8 @@ if st.session_state.get("wallet_address"):
             # --- Summary Tab ---
             with tab1:
                 st.markdown(f"### 💼 {t('Wallet Overview')}")
+                if tx_limit == "Last 20":
+                    st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
                 col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
@@ -439,7 +494,7 @@ if st.session_state.get("wallet_address"):
                 col5, col6, col7, col8 = st.columns(4)
                 col5.metric(f"{t('Average Buy Price')} ({currency})", f"{avg_buy:,.2f}", help=t("Average price paid per Bitcoin"))
                 col6.metric(f"{t('Total Invested')} ({currency})", f"{invested:,.2f}", help=t("Total amount invested"))
-                col7.metric(t("Holding Period"), f"{int(holding_period_days)} days", help=t("Average time Bitcoin held in wallet"))
+                col7.metric(t("Holding Period"), f"{int(holding_period_days)} days", help=t("Time since first transaction"))
                 col8.metric(t("Wallet vs. Market"), f"{gain_pct - btc_return:.2f}%", help=t("Wallet ROI relative to Bitcoin market return"))
 
                 st.markdown(f"### 📊 {t('Summary Metrics')}")
@@ -592,7 +647,6 @@ if st.session_state.get("wallet_address"):
             # --- Portfolio Tab ---
             with tab3:
                 st.markdown(f"### 📈 {t('Portfolio Performance')}")
-                # Portfolio Value and Cost Basis Chart
                 fig = go.Figure()
                 fig.add_trace(
                     go.Scatter(
@@ -622,7 +676,6 @@ if st.session_state.get("wallet_address"):
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Performance Metrics
                 st.markdown(f"### 📊 {t('Performance Summary')}")
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Percentage return based on current value vs. invested amount"))
@@ -630,7 +683,6 @@ if st.session_state.get("wallet_address"):
                 col3.metric(t("Sharpe Ratio"), f"{sharpe_ratio:.2f}", help=t("Risk-adjusted return (annualized)"))
                 col4.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Largest peak-to-trough decline"))
 
-                # Scenario Analysis
                 st.markdown(f"### 🔮 {t('Portfolio Scenarios')}")
                 scenario_data = []
                 for change in [-20, -10, 0, 10, 20]:
@@ -651,7 +703,6 @@ if st.session_state.get("wallet_address"):
                 st.markdown(f"### 📝 {t('₿it Notes')}")
                 st.markdown(t("Share your insights on Bitcoin and read notes from other users. Add your Bit Note below!"))
 
-                # Form to add a new Bit Note
                 with st.form("bit_note_form"):
                     st.subheader(t("Add ₿it Note"))
                     title = st.text_input(t("Title"), max_chars=100)
@@ -661,9 +712,7 @@ if st.session_state.get("wallet_address"):
 
                     if submitted:
                         if title and description and article_text:
-                            # Load existing notes
                             bit_notes = load_bit_notes()
-                            # Add new note with timestamp
                             new_note = {
                                 "title": title,
                                 "description": description,
@@ -671,17 +720,14 @@ if st.session_state.get("wallet_address"):
                                 "date_posted": datetime.now(timezone.utc).isoformat()
                             }
                             bit_notes.append(new_note)
-                            # Save updated notes
                             save_bit_notes(bit_notes)
                             st.success(t("Bit Note added successfully!"))
                         else:
                             st.error(t("Please fill out all fields."))
 
-                # Display Bit Notes
                 st.markdown(f"### {t('All ₿it Notes')}")
                 bit_notes = load_bit_notes()
                 if bit_notes:
-                    # Sort by date posted (newest first)
                     bit_notes = sorted(bit_notes, key=lambda x: x["date_posted"], reverse=True)
                     for note in bit_notes:
                         date_posted = datetime.fromisoformat(note["date_posted"]).strftime("%Y-%m-%d %H:%M:%S UTC")
