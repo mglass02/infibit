@@ -592,17 +592,6 @@ if st.session_state.user_email:
                         logger.error(f"Invalid email format provided for subscription: {st.session_state.user_email}")
                         st.error(t("Invalid email format. Ensure your email is valid (e.g., user@example.com)."))
                     else:
-                        # Use the provided static GoCardless billing request URL
-                        redirect_url = "https://pay.gocardless.com/BRT0003XM6FHXA5"
-                        logger.info(f"Redirecting user {st.session_state.user_email} to GoCardless subscription: {redirect_url}")
-
-                        # Display the redirect button
-                        st.markdown(
-                            f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px;border: none;">{t("Set Up Direct Debit")}</button></a>',
-                            unsafe_allow_html=True
-                        )
-                        st.info(t("Click the button above to complete the direct debit setup. Your subscription will activate within 3–5 days."))
-
                         # Update subscription status to pending
                         update_subscription_status(
                             st.session_state.user_email,
@@ -610,6 +599,19 @@ if st.session_state.user_email:
                             subscription_status="pending",
                             mandate_id=None
                         )
+                        # Log the redirect attempt
+                        redirect_url = "https://pay.gocardless.com/BRT0003XM6FHXA5"
+                        logger.info(f"Redirecting user {st.session_state.user_email} to GoCardless subscription: {redirect_url}")
+                        # Trigger automatic redirect using JavaScript
+                        st.markdown(
+                            f"""
+                            <script>
+                                window.open('{redirect_url}', '_blank');
+                            </script>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        st.success(t("Opening subscription page. Please complete the direct debit setup."))
             except Exception as e:
                 logger.error(f"Error initiating subscription for {st.session_state.user_email}: {e}")
                 st.error(t("Failed to initiate subscription. Please try again or contact support."))
@@ -642,7 +644,7 @@ if st.session_state.user_email:
                 st.session_state.wallet_address,
                 t("Wallet address is set at signup. Changing it is a premium feature coming soon."),
                 t("Unlock Full Access"),
-                t("Subscribe to InfiBit Analytics Premium for £10/month to access all features.")
+                t("Subscribe to InfiBit Analytics Premium for £9.99/month to access all features.")
             ),
             unsafe_allow_html=True
         )
@@ -908,13 +910,13 @@ if st.session_state.user_email:
                             st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
                         col1, col2, col3, col4 = st.columns(4)
                         col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
-                        col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
+                        col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}"), help=t("Current market value")
                         col3.metric(f"{t('Profit/Loss')} ({currency})", f"{gain:,.2f}", delta=f"{gain_pct:.2f}%", help=t("Unrealized profit or loss"))
                         col4.metric(t("30-Day Volatility"), f"{volatility:.2f}%", help=t("Annualized price volatility of Bitcoin"))
 
                         col5, col6, col7, col8 = st.columns(4)
                         col5.metric(f"{t('Average Buy Price')} ({currency})", f"{avg_buy:,.2f}", help=t("Average price paid per Bitcoin"))
-                        col6.metric(f"{t('Total Invested')} ({currency})", f"{invested:,.2f}", help=t("Total amount invested"))
+                        col6.metric(f"{t('Total Invested')} (${currency})", f"{invested:,.2f}", help=t("Total amount invested"))
                         col7.metric(t("Holding Period"), f"{holding_period_days} days", help=t("Days since first transaction"))
                         col8.metric(t("Sharpe Ratio"), f"{sharpe_ratio:.2f}", help=t("Risk-adjusted return"))
 
@@ -1063,7 +1065,7 @@ if st.session_state.user_email:
                             note_title = st.text_input(t("Note Title"), max_chars=100)
                             note_description = st.text_area(t("Description"), max_chars=500)
                             note_content = st.text_area(t("Content"), max_chars=1000)
-                            note_submitted = st.form_submit_button(t("Submit Note"))
+                            note_submitted = st.form_submit_form_button(t("Submit Note"))
                             if note_submitted:
                                 if note_title and note_description and note_content:
                                     try:
