@@ -23,35 +23,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Validate required environment variables
-REQUIRED_ENV_VARS = [
-    "DB_PATH",
-    "COINGECKO_PRICE_API",
-    "CRYPTOCOMPARE_HISTORICAL_API",
-    "BLOCKSTREAM_ADDRESS_API",
-    "BLOCKSTREAM_TXS_API",
-    "BLOCKSTREAM_TXS_CHAIN_API",
-    "BLOCKSTREAM_TX_API",
-    "COINGECKO_HISTORICAL_API",
-    "FRANKFURTER_CURRENCY_API",
-    "USERS_JSON_PATH",
-    "NOTES_JSON",
-    "FALLBACK_USD_RATE",
-    "FALLBACK_GBP_RATE",
-    "FALLBACK_EUR_RATE"
-]
-missing_vars = [var for var in REQUIRED_ENV_VARS if os.getenv(var) is None]
-if missing_vars:
-    error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
-    logger.error(error_msg)
-    st.error(error_msg)
-    raise ValueError(error_msg)
-
 # --- Database Functions ---
 @contextmanager
 def get_db_connection():
-    db_path = os.getenv("DB_PATH")
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect("infibit.db")
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -62,26 +37,26 @@ def init_db():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            # Create users table with email_hash
+            # Create users table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT,
-                    email_hash TEXT PRIMARY KEY,
+                    email TEXT PRIMARY KEY,
                     wallet_address TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
             """)
-            # Create notes table with user_email_hash
+            # Create notes table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_email_hash TEXT NOT NULL,
+                    user_email TEXT NOT NULL,
                     title TEXT NOT NULL,
                     description TEXT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    FOREIGN KEY (user_email_hash) REFERENCES users(email_hash) ON DELETE CASCADE
+                    FOREIGN KEY (user_email) REFERENCES users(email) ON DELETE CASCADE
                 )
             """)
             conn.commit()
@@ -89,10 +64,6 @@ def init_db():
     except sqlite3.Error as e:
         logger.error(f"Error initializing database: {e}")
         raise
-
-def hash_email(email):
-    """Hash email using bcrypt."""
-    return bcrypt.hashpw(email.lower().encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 def load_users():
     users = {}
@@ -102,7 +73,7 @@ def load_users():
             cursor.execute("SELECT * FROM users")
             rows = cursor.fetchall()
             for row in rows:
-                users[row["email_hash"]] = {
+                users[row["email"]] = {
                     "username": row["username"],
                     "wallet_address": row["wallet_address"],
                     "password_hash": row["password_hash"],
@@ -116,40 +87,37 @@ def load_users():
 
 def save_user(email, username, wallet_address, password_hash, created_at):
     try:
-        email_hash = hash_email(email)
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO users (email_hash, username, wallet_address, password_hash, created_at)
+                INSERT INTO users (email, username, wallet_address, password_hash, created_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (email_hash, username, wallet_address, password_hash, created_at))
+            """, (email, username, wallet_address, password_hash, created_at))
             conn.commit()
-        logger.info(f"User with email hash {email_hash} saved successfully.")
+        logger.info(f"User {email} saved successfully.")
     except sqlite3.Error as e:
         logger.error(f"Error saving user to database: {e}")
         raise
 
 def save_note(user_email, title, description, content, created_at):
     try:
-        user_email_hash = hash_email(user_email)
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO notes (user_email_hash, title, description, content, created_at)
+                INSERT INTO notes (user_email, title, description, content, created_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (user_email_hash, title, description, content, created_at))
+            """, (user_email, title, description, content, created_at))
             conn.commit()
-        logger.info(f"Note '{title}' saved for user with email hash {user_email_hash}.")
+        logger.info(f"Note '{title}' saved for user {user_email}.")
     except sqlite3.Error as e:
         logger.error(f"Error saving note to database: {e}")
         raise
 
 def load_user_notes(user_email):
     try:
-        user_email_hash = hash_email(user_email)
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM notes WHERE user_email_hash = ?", (user_email_hash,))
+            cursor.execute("SELECT * FROM notes WHERE user_email = ?", (user_email,))
             rows = cursor.fetchall()
             notes = [
                 {
@@ -158,62 +126,58 @@ def load_user_notes(user_email):
                     "description": row["description"],
                     "content": row["content"],
                     "date": row["created_at"],
-                    "author": user_email  # Display original email for UI
+                    "author": row["user_email"]
                 }
                 for row in rows
             ]
-        logger.info(f"Loaded {len(notes)} notes for user with email hash {user_email_hash}.")
+        logger.info(f"Loaded {len(notes)} notes for user {user_email}.")
         return notes
     except sqlite3.Error as e:
-        logger.error(f"Error loading notes for user with email hash {user_email_hash}: {e}")
+        logger.error(f"Error loading notes for user {user_email}: {e}")
         return []
 
 def migrate_users_from_json():
-    users_json_path = os.getenv("USERS_JSON_PATH")
-    if os.path.exists(users_json_path):
+    if os.path.exists("users.json"):
         try:
-            with open(users_json_path, "r") as f:
+            with open("users.json", "r") as f:
                 json_users = json.load(f)
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 for email, data in json_users.items():
-                    email_hash = hash_email(email)
                     cursor.execute("""
-                        INSERT OR IGNORE INTO users (email_hash, username, wallet_address, password_hash, created_at)
+                        INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at)
                         VALUES (?, ?, ?, ?, ?)
-                    """, (email_hash, None, data["wallet_address"], data["password_hash"], data["created_at"]))
+                    """, (email, None, data["wallet_address"], data["password_hash"], data["created_at"]))
                 conn.commit()
-            logger.info(f"Migrated {len(json_users)} users from {users_json_path} to SQLite database.")
-            os.replace(users_json_path, f"{users_json_path}.bak")
+            logger.info(f"Migrated {len(json_users)} users from users.json to SQLite database.")
+            os.rename("users.json", "users.json.bak")
         except Exception as e:
             logger.error(f"Error migrating users: {e}")
 
 def migrate_notes_from_json():
-    notes_json_path = os.getenv("NOTES_JSON")
-    if os.path.exists(notes_json_path):
+    if os.path.exists("bit_notes.json"):
         try:
-            with open(notes_json_path, "r") as f:
+            with open("bit_notes.json", "r") as f:
                 json_notes = json.load(f)
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 users = load_users()
-                for note in json_notes:
+                for necktie in json_notes:
                     user_email = note.get("author")
-                    user_email_hash = hash_email(user_email)
-                    if user_email_hash in users:
+                    if user_email in users:
                         cursor.execute("""
-                            INSERT OR IGNORE INTO notes (user_email_hash, title, description, content, created_at)
+                            INSERT OR IGNORE Dietrich notes (user_email, title, description, content, created_at)
                             VALUES (?, ?, ?, ?, ?)
                         """, (
-                            user_email_hash,
+                            user_email,
                             note.get("title", "Untitled"),
                             note.get("description", ""),
-                            note.get("content", note.get("contents", "")),
+                            note.get("content", note.get("contents", "")),  # Handle old key
                             note.get("date", datetime.now(timezone.utc).isoformat())
                         ))
                 conn.commit()
-            logger.info(f"Migrated {len(json_notes)} notes from {notes_json_path} to SQLite database.")
-            os.replace(notes_json_path, f"{notes_json_path}.bak")
+            logger.info(f"Migrated {len(json_notes)} notes from bit_notes.json to SQLite database.")
+            os.rename("bit_notes.json", "bit_notes.json.bak")
         except Exception as e:
             logger.error(f"Error migrating notes: {e}")
 
@@ -247,7 +211,7 @@ LANGUAGE_OPTIONS = {
 }
 
 # --- Default Language ---
-language = "en"
+language = "en"  # Default to English
 
 # --- Translate Function ---
 def t(text):
@@ -335,7 +299,7 @@ st.markdown(
             margin: 20px 0 10px;
         }
         .stButton>button {
-            border-radius: 8px;
+            border-radius: 6px;
             background-color: #007BFF;
             color: #FFFFFF;
             font-weight: 500;
@@ -349,7 +313,7 @@ st.markdown(
         .stDataFrame table {
             border-collapse: collapse;
             width: 100%;
-            font-size: 14px;
+            font-size: 0.9em;
         }
         .stDataFrame th {
             background-color: #F5F6F5;
@@ -426,9 +390,8 @@ with st.sidebar:
             password = st.text_input(t("Password"), type="password", key="login_password")
             if st.button(t("Login")):
                 if email and password:
-                    email_hash = hash_email(email)
                     users = load_users()
-                    user = users.get(email_hash)
+                    user = users.get(email)
                     if user and check_password(password, user["password_hash"]):
                         st.session_state.user_email = email
                         st.session_state.wallet_address = user["wallet_address"]
@@ -436,7 +399,7 @@ with st.sidebar:
                         st.success(t("Logged in successfully!"))
                         st.rerun()
                     else:
-                        st.error(t("Invalid email or Password"))
+                        st.error(t("Invalid email or password."))
                 else:
                     st.error(t("Please enter email and password."))
 
@@ -451,9 +414,8 @@ with st.sidebar:
                     if not validate_wallet_address(new_wallet):
                         st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
                     else:
-                        email_hash = hash_email(new_email)
                         users = load_users()
-                        if email_hash in users:
+                        if new_email in users:
                             st.error(t("Email already registered."))
                         else:
                             try:
@@ -489,7 +451,8 @@ if st.session_state.user_email:
         <div style='text-align: center; margin: 30px 0;'>
             <h1>Infi₿it Wallet Dashboard</h1>
             <p style='color: #4A4A4A; font-size: 1em;'>{0}</p>
-            """.format(t("Monitor your Bitcoin wallet with real-time insights")),
+        </div>
+        """.format(t("Monitor your Bitcoin wallet with real-time insights")),
         unsafe_allow_html=True
     )
 
@@ -512,11 +475,9 @@ if st.session_state.user_email:
     # --- API Functions ---
     @st.cache_data(ttl=3600)
     def get_current_btc_price():
-        url = os.getenv("COINGECKO_PRICE_API")
-        api_key = os.getenv("COINGECKO_API_KEY")
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
             return response.json().get("bitcoin", {}).get("usd", 0)
         except Exception as e:
@@ -530,10 +491,8 @@ if st.session_state.user_email:
         try:
             dt = datetime.strptime(date_str, '%d-%m-%Y')
             ts = int(dt.replace(tzinfo=timezone.utc).timestamp())
-            url = os.getenv("CRYPTOCOMPARE_HISTORICAL_API").format(ts=ts)
-            api_key = os.getenv("CRYPTOCOMPARE_API_KEY")
-            headers = {"Authorization": f"Apikey {api_key}"} if api_key else {}
-            response = requests.get(url, headers=headers, timeout=10)
+            url = f"https://min-api.cryptocompare.com/data/pricehistorical?fsym=BTC&tsyms=USD&ts={ts}"
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
             price = response.json().get("BTC", {}).get("USD", 0)
             price_cache[date_str] = price
@@ -544,14 +503,14 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=3600)
     def get_wallet_balance(address):
-        url = os.getenv("BLOCKSTREAM_ADDRESS_API").format(address=address)
+        url = f"https://blockstream.info/api/address/{address}"
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             stats = response.json().get("chain_stats", {})
             funded = stats.get("funded_txo_sum", 0)
             spent = stats.get("spent_txo_sum", 0)
-            balance = (funded - spent) / 1e8
+            balance = (funded - spent) / 1e8  # Convert satoshis to BTC
             logger.info(f"Balance for {address}: {balance:.8f} BTC")
             return max(balance, 0)
         except Exception as e:
@@ -562,17 +521,16 @@ if st.session_state.user_email:
     @st.cache_data(ttl=3600)
     def get_txs_all(address):
         all_txs = []
-        base_url = os.getenv("BLOCKSTREAM_TXS_API").format(address=address)
+        url = f"https://blockstream.info/api/address/{address}/txs"
         try:
             logger.info(f"Fetching transactions for address: {address}")
             if tx_limit == "Last 20":
-                response = requests.get(base_url, timeout=10)
+                response = requests.get(url, timeout=10)
                 response.raise_for_status()
                 txs = response.json()
                 all_txs.extend(txs[:20])
                 logger.info(f"Fetched {len(all_txs)} transactions (limited to 20)")
             else:
-                url = base_url
                 while True:
                     response = requests.get(url, timeout=10)
                     response.raise_for_status()
@@ -583,7 +541,7 @@ if st.session_state.user_email:
                     if len(txs) < 25:
                         break
                     last_txid = txs[-1]['txid']
-                    url = os.getenv("BLOCKSTREAM_TXS_CHAIN_API").format(address=address, last_txid=last_txid)
+                    url = f"https://blockstream.info/api/address/{address}/txs/chain/{last_txid}"
                     time.sleep(1)  # Respect rate limits
                 logger.info(f"Fetched {len(all_txs)} transactions (all)")
             if not all_txs:
@@ -596,7 +554,7 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=3600)
     def get_tx_details(txid):
-        url = os.getenv("BLOCKSTREAM_TX_API").format(txid=txid)
+        url = f"https://blockstream.info/api/tx/{txid}"
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
@@ -607,11 +565,9 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=86400)
     def get_btc_historical_prices(days=30):
-        url = os.getenv("COINGECKO_HISTORICAL_API").format(days=days)
-        api_key = os.getenv("COINGECKO_API_KEY")
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days={days}"
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
             prices = response.json().get("prices", [])
             return pd.DataFrame(prices, columns=["timestamp", "price"]).assign(
@@ -623,22 +579,18 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=900)
     def get_currency_rates():
-        url = os.getenv("FRANKFURTER_CURRENCY_API")
+        url = "https://api.frankfurter.app/latest?from=USD&to=USD,GBP,EUR"
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
             rates = data.get("rates", {})
             if "USD" not in rates:
-                rates["USD"] = float(os.getenv("FALLBACK_USD_RATE"))
+                rates["USD"] = 1.0
             return rates
         except Exception as e:
             logger.error(f"Error fetching currency rates: {e}")
-            return {
-                "USD": float(os.getenv("FALLBACK_USD_RATE")),
-                "GBP": float(os.getenv("FALLBACK_GBP_RATE")),
-                "EUR": float(os.getenv("FALLBACK_EUR_RATE"))
-            }
+            return {"USD": 1.0, "GBP": 0.78, "EUR": 0.92}
 
     # --- Stats Logic ---
     def get_wallet_stats(address):
@@ -925,7 +877,7 @@ if st.session_state.user_email:
                                         created_at=datetime.now(timezone.utc).isoformat()
                                     )
                                     st.success(t("Note added successfully!"))
-                                    st.rerun()
+                                    st.rerun()  # Refresh to show new note
                                 except sqlite3.Error as e:
                                     st.error(t("Failed to save note. Please try again."))
                                     logger.error(f"Note save error: {e}")
