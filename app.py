@@ -93,7 +93,6 @@ def load_users():
             logger.debug(f"Fetched {len(rows)} rows from users table, row type: {type(rows[0]) if rows else 'None'}")
             for row in rows:
                 if isinstance(row, sqlite3.Row):
-                    logger.debug("Processing row as sqlite3.Row")
                     users[row["email"]] = {
                         "username": row["username"],
                         "wallet_address": row["wallet_address"],
@@ -104,7 +103,6 @@ def load_users():
                         "mandate_id": row["mandate_id"]
                     }
                 else:
-                    logger.warning("Processing row as tuple")
                     users[row[1]] = {
                         "username": row[0],
                         "wallet_address": row[2],
@@ -125,7 +123,7 @@ def save_user(email, username, wallet_address, password_hash, created_at, gocard
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, text, gocardless_customer_id, subscription_status, mandate_id)
+                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id))
             conn.commit()
@@ -141,9 +139,9 @@ def update_subscription_status(email, gocardless_customer_id, subscription_statu
             cursor.execute("""
                 UPDATE users
                 SET gocardless_customer_id = ?,
-                subscription_status = ?,
-                mandate_id = ?,
-                WHERE email = ?,
+                    subscription_status = ?,
+                    mandate_id = ?
+                WHERE email = ?
             """, (gocardless_customer_id, subscription_status, mandate_id, email))
             conn.commit()
         logger.info(f"Subscription status updated for user {email}.")
@@ -174,6 +172,7 @@ def get_user_subscription(email):
     except sqlite3.Error as e:
         logger.error(f"Error fetching subscription for {email}: {e}")
         return {}
+
 
 def save_note(user_email, title, description, content, created_at):
     try:
