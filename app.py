@@ -14,6 +14,8 @@ import logging
 import stripe
 import bcrypt
 from dotenv import load_dotenv
+import sqlite3
+from contextlib import contextmanager
 
 # Load environment variables
 load_dotenv()
@@ -31,6 +33,97 @@ if not STRIPE_PUBLISHABLE_KEY or not stripe.api_key:
     logger.error("Stripe keys are not configured: Publishable=%s, Secret=%s",
                  STRIPE_PUBLISHABLE_KEY, stripe.api_key[:4] + "****" if stripe.api_key else None)
     raise ValueError("Stripe API keys are missing. Set STRIPE_PUBLISHABLE_KEY and STRIPE_SECRET_KEY in Streamlit Cloud Secrets.")
+
+# --- Database Functions ---
+@contextmanager
+def get_db_connection():
+    conn = sqlite3.connect("infibit.db")
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+def init_db():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT,
+                email TEXT PRIMARY KEY,
+                wallet_address TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+    logger.info("Database initialized successfully.")
+
+def load_users():
+    users = {}
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users")
+            rows = cursor.fetchall()
+            for row in rows:
+                users[row["email"]] = {
+                    "username": row["username"],
+                    "wallet_address": row["wallet_address"],
+                    "password_hash": row["password_hash"],
+                    "created_at": row["created_at"]
+                }
+        return users
+    except sqlite3.Error as e:
+        logger.error(f"Error loading users from database: {e}")
+        return {}
+
+def save_user(email, username, wallet_address, password_hash, created_at):
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO users (email, username, wallet_address, password_hash, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (email, username, wallet_address, password_hash, created_at))
+            conn.commit()
+        logger.info(f"User {email} saved successfully.")
+    except sqlite3.Error as e:
+        logger.error(f"Error saving user to database: {e}")
+        raise
+
+def update_wallet_address(email, wallet_address):
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET wallet_address = ? WHERE email = ?", (wallet_address, email))
+            conn.commit()
+        logger.info(f"Wallet address updated for user {email}.")
+    except sqlite3.Error as e:
+        logger.error(f"Error updating wallet address: {e}")
+        raise
+
+def migrate_users_from_json():
+    if os.path.exists("users.json"):
+        try:
+            with open("users.json", "r") as f:
+                json_users = json.load(f)
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                for email, data in json_users.items():
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (email, None, data["wallet_address"], data["password_hash"], data["created_at"]))
+                conn.commit()
+            logger.info("Migrated users from users.json to SQLite database.")
+            os.rename("users.json", "users.json.bak")
+        except Exception as e:
+            logger.error(f"Error migrating users: {e}")
+
+# Initialize database and migrate existing users
+init_db()
+migrate_users_from_json()
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -64,24 +157,6 @@ def t(text):
     except Exception as e:
         logger.error(f"Translation error: {e}")
         return text
-
-# --- User Data Management ---
-def load_users():
-    try:
-        if os.path.exists("users.json"):
-            with open("users.json", "r") as f:
-                return json.load(f)
-        return {}
-    except Exception as e:
-        logger.error(f"Error loading users: {e}")
-        return {}
-
-def save_users(users):
-    try:
-        with open("users.json", "w") as f:
-            json.dump(users, f, indent=4)
-    except Exception as e:
-        logger.error(f"Error saving users: {e}")
 
 # --- Subscription Check ---
 def check_subscription(email):
@@ -308,6 +383,7 @@ with st.sidebar:
 
     # Sign-Up Tab
     with tab_signup:
+        new_username = st.text_input(t("Username (Optional)"), key="signup_username")
         new_email = st.text_input(t("Email"), key="signup_email")
         new_wallet = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
         new_password = st.text_input(t("Password"), type="password", key="signup_password")
@@ -320,15 +396,19 @@ with st.sidebar:
                     if new_email in users:
                         st.error(t("Email already registered."))
                     else:
-                        users[new_email] = {
-                            "wallet_address": new_wallet,
-                            "password_hash": hash_password(new_password),
-                            "created_at": datetime.now(timezone.utc).isoformat()
-                        }
-                        save_users(users)
-                        st.success(t("Signed up successfully! Please log in."))
+                        try:
+                            save_user(
+                                email=new_email,
+                                username=new_username if new_username else None,
+                                wallet_address=new_wallet,
+                                password_hash=hash_password(new_password),
+                                created_at=datetime.now(timezone.utc).isoformat()
+                            )
+                            st.success(t("Signed up successfully! Please log in."))
+                        except sqlite3.Error:
+                            st.error(t("Failed to register user. Please try again."))
             else:
-                st.error(t("Please fill out all fields."))
+                st.error(t("Please fill out email, wallet address, and password."))
 
     # Sidebar Controls (only for logged-in users)
     if st.session_state.user_email:
@@ -453,10 +533,11 @@ if st.session_state.user_email:
             if submitted:
                 if wallet_input and validate_wallet_address(wallet_input):
                     st.session_state.wallet_address = wallet_input
-                    users = load_users()
-                    users[st.session_state.user_email]["wallet_address"] = wallet_input
-                    save_users(users)
-                    st.success(t("Wallet address updated successfully!"))
+                    try:
+                        update_wallet_address(st.session_state.user_email, wallet_input)
+                        st.success(t("Wallet address updated successfully!"))
+                    except sqlite3.Error:
+                        st.error(t("Failed to update wallet address. Please try again."))
                 else:
                     st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
                     users = load_users()

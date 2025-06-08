@@ -2,4 +2,6 @@
 users.json
 bit_notes.json
 __pycache__/
+infibit.db
+users.json.bak
 *.pyc
