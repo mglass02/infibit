@@ -45,19 +45,23 @@ def get_db_connection():
         conn.close()
 
 def init_db():
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                username TEXT,
-                email TEXT PRIMARY KEY,
-                wallet_address TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        """)
-        conn.commit()
-    logger.info("Database initialized successfully.")
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT,
+                    email TEXT PRIMARY KEY,
+                    wallet_address TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        logger.info("Database initialized successfully.")
+    except sqlite3.Error as e:
+        logger.error(f"Error initializing database: {e}")
+        raise
 
 def load_users():
     users = {}
@@ -73,6 +77,7 @@ def load_users():
                     "password_hash": row["password_hash"],
                     "created_at": row["created_at"]
                 }
+        logger.info(f"Loaded {len(users)} users from database.")
         return users
     except sqlite3.Error as e:
         logger.error(f"Error loading users from database: {e}")
@@ -116,14 +121,35 @@ def migrate_users_from_json():
                         VALUES (?, ?, ?, ?, ?)
                     """, (email, None, data["wallet_address"], data["password_hash"], data["created_at"]))
                 conn.commit()
-            logger.info("Migrated users from users.json to SQLite database.")
+            logger.info(f"Migrated {len(json_users)} users from users.json to SQLite database.")
             os.rename("users.json", "users.json.bak")
         except Exception as e:
             logger.error(f"Error migrating users: {e}")
 
+def debug_db():
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = [row["name"] for row in cursor.fetchall()]
+            if "users" in tables:
+                cursor.execute("SELECT * FROM users")
+                rows = cursor.fetchall()
+                return [{"username": row["username"], "email": row["email"], "wallet_address": row["wallet_address"],
+                         "password_hash": row["password_hash"][:20] + "...", "created_at": row["created_at"]} for row in rows]
+            else:
+                return []
+    except sqlite3.Error as e:
+        logger.error(f"Debug DB error: {e}")
+        return []
+
 # Initialize database and migrate existing users
-init_db()
-migrate_users_from_json()
+try:
+    init_db()
+    migrate_users_from_json()
+except Exception as e:
+    logger.error(f"Failed to initialize database or migrate users: {e}")
+    st.error("Database initialization failed. Please check logs.")
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -405,8 +431,12 @@ with st.sidebar:
                                 created_at=datetime.now(timezone.utc).isoformat()
                             )
                             st.success(t("Signed up successfully! Please log in."))
-                        except sqlite3.Error:
+                            # Debug: Show database contents
+                            st.write("Debug: Current users in database:")
+                            st.dataframe(pd.DataFrame(debug_db()))
+                        except sqlite3.Error as e:
                             st.error(t("Failed to register user. Please try again."))
+                            logger.error(f"Sign-up error: {e}")
             else:
                 st.error(t("Please fill out email, wallet address, and password."))
 
@@ -422,6 +452,10 @@ with st.sidebar:
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
         language = LANGUAGE_OPTIONS[language_label]
         tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"))
+        # Debug: Download database
+        if os.path.exists("infibit.db"):
+            with open("infibit.db", "rb") as f:
+                st.download_button("Download Database (Debug)", f, "infibit.db")
 
 # --- Main App Logic ---
 if st.session_state.user_email:
@@ -536,8 +570,9 @@ if st.session_state.user_email:
                     try:
                         update_wallet_address(st.session_state.user_email, wallet_input)
                         st.success(t("Wallet address updated successfully!"))
-                    except sqlite3.Error:
+                    except sqlite3.Error as e:
                         st.error(t("Failed to update wallet address. Please try again."))
+                        logger.error(f"Wallet update error: {e}")
                 else:
                     st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
                     users = load_users()
