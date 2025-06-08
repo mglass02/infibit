@@ -142,7 +142,7 @@ def update_subscription_status(email, gocardless_customer_id, subscription_statu
                 UPDATE users
                 SET gocardless_customer_id = ?,
                 subscription_status = ?,
-                mandate_id = ?,
+                mandate_id = ?
                 WHERE email = ?,
             """, (gocardless_customer_id, subscription_status, mandate_id, email))
             conn.commit()
