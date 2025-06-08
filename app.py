@@ -22,18 +22,23 @@ GOCARDLESS_API_KEY = os.getenv("GOCARDLESS_API_KEY") or "live_if50oanOpNbrFYBWWG
 GOCARDLESS_PLAN_ID = "BRT0003XM6FHXA5"
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)  # DEBUG for diagnostics
 logger = logging.getLogger(__name__)
 
 # --- Database Functions ---
 @contextmanager
 def get_db_connection():
-    conn = sqlite3.connect("infibit.db")
-    conn.row_factory = sqlite3.Row
     try:
-        yield conn
-    finally:
-        conn.close()
+        conn = sqlite3.connect("infibit.db")
+        conn.row_factory = sqlite3.Row
+        logger.debug("SQLite connection established with row_factory set to sqlite3.Row")
+        try:
+            yield conn
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Error establishing database connection: {e}")
+        raise
 
 def init_db():
     try:
@@ -84,19 +89,35 @@ def load_users():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM users")
+            cursor.execute("SELECT username, email, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id FROM users")
             rows = cursor.fetchall()
+            logger.debug(f"Fetched {len(rows)} rows from users table, row type: {type(rows[0]) if rows else 'None'}")
             for row in rows:
-                users[row["email"]] = {
-                    "username": row["username"],
-                    "wallet_address": row["wallet_address"],
-                    "password_hash": row["password_hash"],
-                    "created_at": row["created_at"],
-                    "gocardless_customer_id": row.get("gocardless_customer_id", None),
-                    "subscription_status": row.get("subscription_status", None),
-                    "mandate_id": row.get("mandate_id", None)
-                }
-        logger.info(f"Loaded {len(users)} users from database.")
+                # Handle both Row and tuple cases
+                if isinstance(row, sqlite3.Row):
+                    logger.debug("Processing row as sqlite3.Row")
+                    users[row["email"]] = {
+                        "username": row["username"],
+                        "wallet_address": row["wallet_address"],
+                        "password_hash": row["password_hash"],
+                        "created_at": row["created_at"],
+                        "gocardless_customer_id": row["gocardless_customer_id"],
+                        "subscription_status": row["subscription_status"],
+                        "mandate_id": row["mandate_id"]
+                    }
+                else:
+                    logger.warning("Processing row as tuple")
+                    # Tuple indices based on SELECT order
+                    users[row[1]] = {  # email at index 1
+                        "username": row[0],
+                        "wallet_address": row[2],
+                        "password_hash": row[3],
+                        "created_at": row[4],
+                        "gocardless_customer_id": row[5] if len(row) > 5 else None,
+                        "subscription_status": row[6] if len(row) > 6 else None,
+                        "mandate_id": row[7] if len(row) > 7 else None
+                    }
+            logger.info(f"Loaded {len(users)} users from database")
         return users
     except sqlite3.Error as e:
         logger.error(f"Error loading users from database: {e}")
@@ -138,11 +159,19 @@ def get_user_subscription(email):
             cursor.execute("SELECT gocardless_customer_id, subscription_status, mandate_id FROM users WHERE email = ?", (email,))
             row = cursor.fetchone()
             if row:
-                return {
-                    "gocardless_customer_id": row["gocardless_customer_id"],
-                    "subscription_status": row["subscription_status"],
-                    "mandate_id": row["mandate_id"]
-                }
+                # Handle both Row and tuple
+                if isinstance(row, sqlite3.Row):
+                    return {
+                        "gocardless_customer_id": row["gocardless_customer_id"],
+                        "subscription_status": row["subscription_status"],
+                        "mandate_id": row["mandate_id"]
+                    }
+                else:
+                    return {
+                        "gocardless_customer_id": row[0],
+                        "subscription_status": row[1],
+                        "mandate_id": row[2]
+                    }
         return {}
     except sqlite3.Error as e:
         logger.error(f"Error fetching subscription for {email}: {e}")
@@ -170,12 +199,12 @@ def load_user_notes(user_email):
             rows = cursor.fetchall()
             notes = [
                 {
-                    "id": row["id"],
-                    "title": row["title"],
-                    "description": row["description"],
-                    "content": row["content"],
-                    "date": row["created_at"],
-                    "author": row["user_email"]
+                    "id": row["id"] if isinstance(row, sqlite3.Row) else row[0],
+                    "title": row["title"] if isinstance(row, sqlite3.Row) else row[2],
+                    "description": row["description"] if isinstance(row, sqlite3.Row) else row[3],
+                    "content": row["content"] if isinstance(row, sqlite3.Row) else row[4],
+                    "date": row["created_at"] if isinstance(row, sqlite3.Row) else row[5],
+                    "author": row["user_email"] if isinstance(row, sqlite3.Row) else row[1]
                 }
                 for row in rows
             ]
@@ -341,9 +370,9 @@ st.markdown(
             margin: 20px 0 10px;
         }
         .stButton>button {
-            border-radius: 6px;
             background-color: #007BFF;
-            color: #FFFFFF;
+            color: white;
+            border-radius: 6px;
             font-weight: 500;
             padding: 8px 16px;
             border: none;
@@ -355,11 +384,11 @@ st.markdown(
         .stDataFrame table {
             border-collapse: collapse;
             width: 100%;
-            font-size: 0.9em;
+            font-size: 14px;
         }
         .stDataFrame th {
             background-color: #F5F6F5;
-            color: #1A1A1A;
+            color: #333;
             padding: 12px;
             text-align: left;
             font-weight: 600;
@@ -375,16 +404,16 @@ st.markdown(
             color: #007BFF;
         }
         .stTabs [data-baseweb="tab"] {
-            font-size: 1em;
+            font-size: 14px;
             font-weight: 500;
             padding: 10px 20px;
-            color: #4A4A4A;
+            color: #333;
         }
         .stTabs [data-baseweb="tab"]:hover {
             color: #007BFF;
         }
         .sidebar .sidebar-content {
-            background-color: #FFFFFF;
+            background-color: #FFF;
             box-shadow: 2px 0 5px rgba(0,0,0,0.05);
         }
         a {
@@ -569,31 +598,35 @@ if st.session_state.user_email:
                 customer_response.raise_for_status()
                 customer_id = customer_response.json()["customers"]["id"]
 
-                # Create billing request using the provided plan ID
+                # Create billing request
                 billing_request_data = {
-                    "currency": "GBP",
-                    "mandate_request": {"scheme": "bacs"},
-                    "payment_request": {
-                        "amount": "999",  # £9.99 in pence
+                    "billing_requests": {
                         "currency": "GBP",
-                        "interval_unit": "monthly",
-                        "interval": 1
+                        "mandate_request": {"scheme": "bacs"},
+                        "payment_request": {
+                            "amount": 999,  # £9.99 in pence
+                            "currency": "GBP",
+                            "interval_unit": "monthly",
+                            "interval": 1,
+                            "description": "InfiBit Premium Subscription"
+                        }
                     }
                 }
                 billing_request_response = requests.post(
-                    f"https://api.gocardless.com/billing_request_templates/{GOCARDLESS_PLAN_ID}/billing_requests",
+                    "https://api.gocardless.com/billing_requests",
                     headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json={"billing_requests": billing_request_data}
+                    json=billing_request_data
                 )
                 billing_request_response.raise_for_status()
                 billing_request_id = billing_request_response.json()["billing_requests"]["id"]
 
                 # Link customer to billing request
-                requests.post(
+                customer_link_response = requests.post(
                     f"https://api.gocardless.com/billing_requests/{billing_request_id}/actions/collect_customer_details",
                     headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json={"billing_requests": {"customer": customer_id}}
+                    json={"billing_requests": {"customer_id": customer_id}}
                 )
+                customer_link_response.raise_for_status()
 
                 # Redirect to GoCardless payment flow
                 flow_response = requests.post(
@@ -662,10 +695,10 @@ if st.session_state.user_email:
         st.markdown(
             f"""
             <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 20px;'>
-                <h3>{t('User Information')}</h3>
-                <p><strong>{t('Username')}:</strong> {st.session_state.username}</p>
-                <p><strong>{t('Bitcoin Wallet Address')}:</strong> {st.session_state.wallet_address}</p>
-                <p style='color: #4A4A4A; font-size: 0.9em;'>{t('Wallet address is set at signup. Changing it is a premium feature coming soon.')}</p>
+                <h3>{t("User Information")}</h3>
+                <p><strong>{t("Username")}:</strong> {st.session_state.username}</p>
+                <p><strong>{t("Bitcoin Wallet Address")}:</strong> {st.session_state.wallet_address}</p>
+                <p style='color: #4A4A4A; font-size: 0.9em;'>{t("Wallet address is set at signup. Changing it is a premium feature coming soon.")}</p>
             </div>
             """,
             unsafe_allow_html=True
@@ -843,7 +876,7 @@ if st.session_state.user_email:
 
                 logger.debug(f"Tx {txid}: IN={btc_in:.8f}, OUT={btc_out:.8f}, Price={btc_price:.2f}")
 
-            df = pd.DataFrame(data, columns=["Date", "Type", "BTC", "Price at Tx", "USD Value", "TXID", "Confirmed", "Counterparty"])
+            df = pd.DataFrame(data, columns=["Date", "Type", "BTC", "Price at Tx", "USD Value", "Txid", "Confirmed", "Counterparty"])
             if not df.empty:
                 df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%Y")
                 df["Type"] = df["Type"].astype(str)
@@ -966,7 +999,7 @@ if st.session_state.user_email:
                         ]
 
                         st.dataframe(
-                            filtered_df[["Date", "Type", "BTC", "USD Value", "Price at Tx", "TXID", "Confirmed", "Counterparty"]],
+                            filtered_df[["Date", "Type", "BTC", "USD Value", "Price at Tx", "Txid", "Confirmed", "Counterparty"]],
                             use_container_width=True
                         )
 
@@ -979,7 +1012,7 @@ if st.session_state.user_email:
                             key="download_transactions"
                         )
 
-                        st.markdown(f"### 📊 {t('Transaction Volume')}")
+                        st.markdown(f"### 📈 {t('Transaction Volume')}")
                         volume_df = filtered_df.groupby("Date")["BTC"].sum().reset_index()
                         fig_volume = go.Figure()
                         fig_volume.add_trace(
@@ -998,13 +1031,13 @@ if st.session_state.user_email:
                         )
                         st.plotly_chart(fig_volume, use_container_width=True)
 
-                        st.markdown(f'### 📈 {t("Transaction Frequency")}')
-                        freq_df = filtered_df.groupby("Date")["TXID"].count().reset_index()
+                        st.markdown(f"### 📉 {t('Transaction Frequency')}")
+                        freq_df = filtered_df.groupby("Date")["Txid"].count().reset_index(name="Count")
                         fig_freq = go.Figure()
                         fig_freq.add_trace(
                             go.Scatter(
                                 x=freq_df["Date"],
-                                y=freq_df["TXID"],
+                                y=freq_df["Count"],
                                 mode="lines+markers",
                                 name=t("Transaction Count"),
                                 line=dict(color="#007BFF")
@@ -1018,14 +1051,14 @@ if st.session_state.user_email:
                         )
                         st.plotly_chart(fig_freq, use_container_width=True)
 
-                        st.markdown(f'### 📉 {t("Transaction Statistics")}')
+                        st.markdown(f"### 📊 {t('Transaction Statistics')}")
                         col1, col2 = st.columns(2)
                         col1.metric(t("Average BTC per Tx"), f"{filtered_df['BTC'].mean():,.8f} BTC", help=t("Average BTC per transaction"))
                         col2.metric(f"{t('Average USD per Tx')} ({currency})", f"{filtered_df['USD Value'].mean():,.2f}", help=t("Average USD value per transaction"))
 
                     # --- Portfolio Tab ---
                     with tab3:
-                        st.markdown(f'### 📈 {t("Portfolio Performance")}')
+                        st.markdown(f"### 📈 {t('Portfolio Performance')}")
                         fig_portfolio = go.Figure()
                         fig_portfolio.add_trace(
                             go.Scatter(
@@ -1044,14 +1077,14 @@ if st.session_state.user_email:
                             )
                         )
                         fig_portfolio.update_layout(
-                            title=t("Portfolio Value vs. Cost Basis"),
+                            title=t("Portfolio Value vs Cost Basis"),
                             xaxis_title=t("Date"),
                             yaxis_title=f"{currency}",
                             template="plotly_white"
                         )
                         st.plotly_chart(fig_portfolio, use_container_width=True)
 
-                        st.markdown(f'### 📊 {t("Performance Metrics")}')
+                        st.markdown(f"### 📊 {t('Performance Metrics')}")
                         col1, col2, col3 = st.columns(3)
                         col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Return on investment"))
                         col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Current market price of Bitcoin"))
@@ -1059,7 +1092,7 @@ if st.session_state.user_email:
 
                     # --- Bit Notes Tab ---
                     with tab4:
-                        st.markdown(f'### 📝 {t("₿it Notes")}')
+                        st.markdown(f"### 📝 {t('₿it Notes')}")
                         st.write(t("Share your thoughts on Bitcoin or track your investment notes."))
 
                         with st.form("bit_notes_form"):
@@ -1086,7 +1119,7 @@ if st.session_state.user_email:
                                 else:
                                     st.error(t("Please fill out all fields!"))
 
-                        st.markdown(f'### 📜 {t("Your Notes")}')
+                        st.markdown(f"### 📜 {t('Your Notes')}")
                         notes = load_user_notes(st.session_state.user_email)
                         if notes:
                             for note in notes:
@@ -1108,9 +1141,9 @@ if st.session_state.user_email:
         # --- Footer ---
         st.markdown(
             """
-            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5;'>
+            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
                 <hr style='border-color: #E0E0E0; margin: 20px 0;'>
-                <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics.</p>
+                <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
             </div>
             """,
             unsafe_allow_html=True
@@ -1119,13 +1152,13 @@ if st.session_state.user_email:
 else:
     st.markdown(
         """
-        <div style='text-align: center;'>
-            <h1>Welcome</h1>
+        <div style='text-align: center; margin-top: 50px;'>
+            <h1>Welcome to Infi₿it</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
             <p style='color: #4A4A4A;'>{1}</p>
         </div>
         """.format(
-            t("monitor your wallet with insights"),
+            t("Monitor your Bitcoin wallet with real-time insights"),
             t("Please sign up or log in to access the dashboard.")
         ),
         unsafe_allow_html=True
