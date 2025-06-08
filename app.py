@@ -1,7 +1,8 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
+from datetime import timedelta  # Added for date range handling
 import time
 import numpy as np
 from deep_translator import GoogleTranslator
@@ -15,6 +16,7 @@ import bcrypt
 from dotenv import load_dotenv
 import sqlite3
 from contextlib import contextmanager
+import urllib.parse
 
 # Load environment variables
 load_dotenv()
@@ -22,7 +24,7 @@ GOCARDLESS_API_KEY = os.getenv("GOCARDLESS_API_KEY") or "live_if50oanOpNbrFYBWWG
 GOCARDLESS_PLAN_ID = "BRT0003XM6FHXA5"
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)  # DEBUG for diagnostics
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # --- Database Functions ---
@@ -44,7 +46,6 @@ def init_db():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            # Create users table with minimal columns if it doesn't exist
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT,
@@ -54,7 +55,6 @@ def init_db():
                     created_at TEXT NOT NULL
                 )
             """)
-            # Check for missing columns and add them
             cursor.execute("PRAGMA table_info(users)")
             columns = [col[1] for col in cursor.fetchall()]
             if "gocardless_customer_id" not in columns:
@@ -66,7 +66,6 @@ def init_db():
             if "mandate_id" not in columns:
                 cursor.execute("ALTER TABLE users ADD COLUMN mandate_id TEXT")
                 logger.info("Added mandate_id column to users table.")
-            # Create notes table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +92,6 @@ def load_users():
             rows = cursor.fetchall()
             logger.debug(f"Fetched {len(rows)} rows from users table, row type: {type(rows[0]) if rows else 'None'}")
             for row in rows:
-                # Handle both Row and tuple cases
                 if isinstance(row, sqlite3.Row):
                     logger.debug("Processing row as sqlite3.Row")
                     users[row["email"]] = {
@@ -107,8 +105,7 @@ def load_users():
                     }
                 else:
                     logger.warning("Processing row as tuple")
-                    # Tuple indices based on SELECT order
-                    users[row[1]] = {  # email at index 1
+                    users[row[1]] = {
                         "username": row[0],
                         "wallet_address": row[2],
                         "password_hash": row[3],
@@ -128,7 +125,7 @@ def save_user(email, username, wallet_address, password_hash, created_at, gocard
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO users (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id)
+                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id))
             conn.commit()
@@ -159,7 +156,6 @@ def get_user_subscription(email):
             cursor.execute("SELECT gocardless_customer_id, subscription_status, mandate_id FROM users WHERE email = ?", (email,))
             row = cursor.fetchone()
             if row:
-                # Handle both Row and tuple
                 if isinstance(row, sqlite3.Row):
                     return {
                         "gocardless_customer_id": row["gocardless_customer_id"],
@@ -446,7 +442,7 @@ st.markdown(
 LANGUAGE_OPTIONS = {
     "English 🇬🇧": "en",
     "French 🇫🇷": "fr",
-    "German 🇦🇪": "de",
+    "German 🇩🇪": "de",
     "Spanish 🇪🇸": "es",
     "Italian 🇮🇹": "it",
     "Dutch 🇳🇱": "nl",
@@ -455,14 +451,15 @@ LANGUAGE_OPTIONS = {
 }
 
 # --- Default Language ---
-language = st.session_state.get("language", "en")
+if "language" not in st.session_state:
+    st.session_state.language = "en"
 
 # --- Translate Function ---
 def t(text):
-    if language == "en":
+    if st.session_state.language == "en":
         return text
     try:
-        return GoogleTranslator(source="en", target=language).translate(text)
+        return GoogleTranslator(source="en", target=st.session_state.language).translate(text)
     except Exception as e:
         logger.error(f"Translation error: {e}")
         return text
@@ -502,7 +499,6 @@ with st.sidebar:
     if not st.session_state.user_email:
         tab_login, tab_signup = st.tabs([t("Login"), t("Sign Up")])
 
-        # Login Tab
         with tab_login:
             email = st.text_input(t("Email"), key="login_email")
             password = st.text_input(t("Password"), type="password", key="login_password")
@@ -514,7 +510,7 @@ with st.sidebar:
                         st.session_state.user_email = email
                         st.session_state.wallet_address = user["wallet_address"]
                         st.session_state.username = user["username"] or email
-                        st.session_state.language = "en"  # Reset language on login
+                        st.session_state.language = "en"
                         st.success(t("Logged in successfully!"))
                         st.rerun()
                     else:
@@ -522,7 +518,6 @@ with st.sidebar:
                 else:
                     st.error(t("Please enter email and password."))
 
-        # Sign-Up Tab
         with tab_signup:
             new_username = st.text_input(t("Username (Optional)"), key="signup_username")
             new_email = st.text_input(t("Email"), key="signup_email")
@@ -552,7 +547,6 @@ with st.sidebar:
                 else:
                     st.error(t("Please fill out email, wallet address, and password."))
     else:
-        # Sidebar Controls for logged-in users
         if st.button(t("Logout")):
             st.session_state.user_email = None
             st.session_state.wallet_address = ""
@@ -562,16 +556,13 @@ with st.sidebar:
         currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
         st.session_state.language = LANGUAGE_OPTIONS[language_label]
-        language = st.session_state.language
         tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"))
 
 # --- Main App Logic ---
 if st.session_state.user_email:
-    # Check subscription status
     subscription_info = get_user_subscription(st.session_state.user_email)
     subscription_status, mandate_id = check_subscription_status(subscription_info.get("gocardless_customer_id"))
 
-    # Update subscription status in database
     if subscription_info.get("subscription_status") != subscription_status or subscription_info.get("mandate_id") != mandate_id:
         update_subscription_status(
             st.session_state.user_email,
@@ -580,31 +571,66 @@ if st.session_state.user_email:
             mandate_id
         )
 
-    # Paywall Logic
     if subscription_status != "active":
-        # Non-subscribed user: Show blurred dashboard with subscription prompt
         if st.button(t("Subscribe to Premium")):
             try:
-                # Create GoCardless customer
+                if not st.session_state.user_email or not st.session_state.user_email.strip():
+                    logger.error("No valid email found in session state for subscription")
+                    st.error(t("No valid email found. Please log in again."))
+
+                email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+                if not re.match(email_pattern, st.session_state.user_email):
+                    logger.error(f"Invalid email format provided for subscription: {st.session_state.user_email}")
+                    st.error(t("Invalid email format. Ensure your email is valid (e.g., user@example.com)."))
+
+                given_name = "".join(c for c in (st.session_state.username if st.session_state.username else "User") if c.isalnum() or c in " -")[:50]
+
+                encoded_email = urllib.parse.quote(st.session_state.user_email)
+                check_customer_response = requests.get(
+                    f"https://api.gocardless.com/customers?email={encoded_email}",
+                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
+                    timeout=10
+                )
+                if check_customer_response.status_code == 200:
+                    try:
+                        existing_customers = check_customer_response.json().get("customers", [])
+                    except ValueError:
+                        logger.error(f"Invalid JSON response from GoCardless: {check_customer_response.text}")
+                        st.error(t("Failed to check customer status. Please try again."))
+                    if existing_customers:
+                        logger.warning(f"Customer already exists for email: {st.session_state.user_email}")
+                        st.error(t("A customer account already exists for this email. Please contact support."))
+
                 customer_data = {
-                    "email": st.session_state.user_email,
-                    "given_name": st.session_state.username or "User"
+                    "customers": {
+                        "email": st.session_state.user_email,
+                        "given_name": given_name,
+                        "family_name": "Subscriber"
+                    }
                 }
                 customer_response = requests.post(
                     "https://api.gocardless.com/customers",
                     headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json={"customers": customer_data}
+                    json=customer_data,
+                    timeout=10
                 )
-                customer_response.raise_for_status()
-                customer_id = customer_response.json()["customers"]["id"]
+                if customer_response.status_code != 201:
+                    try:
+                        error_details = customer_response.json().get("error", {})
+                        error_message = error_details.get("message", "Unknown error")
+                    except ValueError:
+                        error_message = f"Invalid response from GoCardless: {customer_response.text}"
+                    logger.error(f"GoCardless customer creation failed: {customer_response.status_code} - {error_message}")
+                    st.error(f"Failed to create customer: {error_message}")
 
-                # Create billing request
+                customer_id = customer_response.json().get("customers", {}).get("id")
+
                 billing_request_data = {
                     "billing_requests": {
                         "currency": "GBP",
                         "mandate_request": {"scheme": "bacs"},
                         "payment_request": {
-                            "amount": 999,  # £9.99 in pence
+                            "amount": 999,
                             "currency": "GBP",
                             "interval_unit": "monthly",
                             "interval": 1,
@@ -615,41 +641,44 @@ if st.session_state.user_email:
                 billing_request_response = requests.post(
                     "https://api.gocardless.com/billing_requests",
                     headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json=billing_request_data
+                    json=billing_request_data,
+                    timeout=10
                 )
                 billing_request_response.raise_for_status()
-                billing_request_id = billing_request_response.json()["billing_requests"]["id"]
+                billing_request_id = billing_request_response.json().get("billing_requests", {}).get("id")
 
-                # Link customer to billing request
                 customer_link_response = requests.post(
                     f"https://api.gocardless.com/billing_requests/{billing_request_id}/actions/collect_customer_details",
                     headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json={"billing_requests": {"customer_id": customer_id}}
+                    json={"billing_requests": {"customer_id": customer_id}},
+                    timeout=10
                 )
                 customer_link_response.raise_for_status()
 
-                # Redirect to GoCardless payment flow
                 flow_response = requests.post(
                     f"https://api.gocardless.com/billing_requests/{billing_request_id}/actions/fulfil",
-                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"}
+                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
+                    timeout=10
                 )
                 flow_response.raise_for_status()
-                redirect_url = flow_response.json()["billing_requests"]["authorisation_url"]
+                redirect_url = flow_response.json().get("billing_requests", {}).get("authorisation_url")
                 st.markdown(
-                    f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px 16px; border: none;">{t("Set Up Direct Debit")}</button></a>',
+                    f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px;border: none;">{t("Set Up Direct Debit")}</button></a>',
                     unsafe_allow_html=True
                 )
                 update_subscription_status(st.session_state.user_email, customer_id, "pending", None)
                 st.info(t("Please complete the direct debit setup. Your subscription will activate within 3–5 days."))
+            except requests.HTTPError as e:
+                error_response = e.response.json() if e.response else {}
+                logger.error(f"GoCardless API error: {e}, Response: {error_response}")
+                st.error(f"Subscription error: {error_response.get('message', str(e))}")
             except Exception as e:
-                logger.error(f"Error initiating GoCardless subscription: {e}")
+                logger.error(f"Unexpected error initiating GoCardless subscription: {e}")
                 st.error(t("Failed to initiate subscription. Please try again."))
-
-        # Blurred Dashboard
         st.markdown(
             """
             <div class='blur'>
-                <div style='text-align: center; margin: 30px 0;'>
+                <div style='text-align: center; margin-top: 30px;'>
                     <h1>Infi₿it Wallet Dashboard</h1>
                     <p style='color: #4A4A4A; font-size: 1em;'>{0}</p>
                 </div>
@@ -680,10 +709,9 @@ if st.session_state.user_email:
             unsafe_allow_html=True
         )
     else:
-        # Subscribed user: Show full dashboard
         st.markdown(
             """
-            <div style='text-align: center; margin: 30px 0;'>
+            <div style='text-align: center; margin-top: 30px;'>
                 <h1>Infi₿it Wallet Dashboard</h1>
                 <p style='color: #4A4A4A; font-size: 1em;'>{0}</p>
             </div>
@@ -691,23 +719,20 @@ if st.session_state.user_email:
             unsafe_allow_html=True
         )
 
-        # Display Username and Wallet Address
         st.markdown(
             f"""
             <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 20px;'>
                 <h3>{t("User Information")}</h3>
                 <p><strong>{t("Username")}:</strong> {st.session_state.username}</p>
                 <p><strong>{t("Bitcoin Wallet Address")}:</strong> {st.session_state.wallet_address}</p>
-                <p style='color: #4A4A4A; font-size: 0.9em;'>{t("Wallet address is set at signup. Changing it is a premium feature coming soon.")}</p>
+                <p style='color: #4A4A4A; font-size: 0.9em;'>{t("Wallet address is set at signup. Changing it is a premium feature.")}</p>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        # --- Constants ---
         price_cache = {}
 
-        # --- API Functions ---
         @st.cache_data(ttl=3600)
         def get_current_btc_price():
             url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
@@ -745,7 +770,7 @@ if st.session_state.user_email:
                 stats = response.json().get("chain_stats", {})
                 funded = stats.get("funded_txo_sum", 0)
                 spent = stats.get("spent_txo_sum", 0)
-                balance = (funded - spent) / 1e8  # Convert satoshis to BTC
+                balance = (funded - spent) / 1e8
                 logger.info(f"Balance for {address}: {balance:.8f} BTC")
                 return max(balance, 0)
             except Exception as e:
@@ -777,7 +802,7 @@ if st.session_state.user_email:
                             break
                         last_txid = txs[-1]['txid']
                         url = f"https://blockstream.info/api/address/{address}/txs/chain/{last_txid}"
-                        time.sleep(1)  # Respect rate limits
+                        time.sleep(1)
                     logger.info(f"Fetched {len(all_txs)} transactions (all)")
                 if not all_txs:
                     logger.warning(f"No transactions found for address: {address}")
@@ -827,7 +852,6 @@ if st.session_state.user_email:
                 logger.error(f"Error fetching currency rates: {e}")
                 return {"USD": 1.0, "GBP": 0.78, "EUR": 0.92}
 
-        # --- Stats Logic ---
         def get_wallet_stats(address):
             txs = get_txs_all(address)
             data = []
@@ -848,9 +872,7 @@ if st.session_state.user_email:
                 btc_price = get_historical_price(date_str)
                 confirmed = detail.get("status", {}).get("confirmed", False)
 
-                # Calculate BTC received (outputs to address)
                 btc_in = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
-                # Calculate BTC spent (inputs from address, excluding change)
                 btc_out = 0
                 for vin in detail.get("vin", []):
                     prevout = vin.get("prevout", {})
@@ -858,9 +880,11 @@ if st.session_state.user_email:
                         input_value = prevout.get("value", 0) / 1e8
                         change_value = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
                         btc_out += max(0, input_value - change_value)
-                # Counterparties
-                counterparties = [vin.get("prevout", {}).get("scriptpubkey_address", "") for vin in detail.get("vin", []) if vin.get("prevout", {}).get("scriptpubkey_address") != address] or \
-                                 [v.get("scriptpubkey_address") for v in detail.get("vout", []) if v.get("scriptpubkey_address") != address]
+                counterparties = [
+                    vin.get("prevout", {}).get("scriptpubkey_address", "") for vin in detail.get("vin", []) if vin.get("prevout", {}).get("scriptpubkey_address") != address
+                ] or [
+                    v.get("scriptpubkey_address") for v in detail.get("vout", []) if v.get("scriptpubkey_address") != address
+                ]
                 counterparty = counterparties[0] if counterparties else "N/A"
 
                 if btc_in > 0:
@@ -888,14 +912,13 @@ if st.session_state.user_email:
 
             return df, total_btc_in, total_btc_out, total_usd_in, total_usd_out, first_tx_date
 
-        # --- Main Dashboard ---
         currency_rates = get_currency_rates()
         multiplier = currency_rates.get(currency.upper(), 1.0)
 
         if st.session_state.wallet_address:
             with st.container():
                 with st.spinner(t("Loading wallet insights...")):
-                    df, btc_in, btc_out, usd_in, usd_out, first_tx_date = get_wallet_stats(st.session_state.wallet_address)
+                    df, total_btc_in, total_btc_out, usd_in, usd_out, first_tx_date = get_wallet_stats(st.session_state.wallet_address)
                     current_price_usd = get_current_btc_price()
                     net_btc = get_wallet_balance(st.session_state.wallet_address)
 
@@ -903,14 +926,14 @@ if st.session_state.user_email:
                     net_usd = usd_in - usd_out
                     wallet_value_usd = net_btc * current_price_usd
                     wallet_value = wallet_value_usd * multiplier
-                    invested = net_usd * multiplier if net_usd > 0 else wallet_value
+                    invested = net_usd * multiplier if total_btc_in > 0 else wallet_value
                     gain = wallet_value - invested
                     gain_pct = (gain / invested) * 100 if invested != 0 else 0
                     avg_buy = invested / net_btc if net_btc != 0 else 0
 
                     if net_btc < 0:
-                        logger.error(f"Negative balance detected: {net_btc:.8f} BTC")
-                        st.error(t("Error: Negative balance detected. Please try fetching all transactions."))
+                        logger.error(f"Invalid balance detected: {net_btc:.8f} BTC")
+                        st.error(t("Error: Invalid balance detected. Please try fetching all transactions."))
                         net_btc = 0
                         wallet_value = 0
                         gain = 0
@@ -921,10 +944,11 @@ if st.session_state.user_email:
                     volatility = historical_prices["price"].pct_change().std() * np.sqrt(252) * 100 if not historical_prices.empty else 0
                     btc_return = (historical_prices["price"].iloc[-1] / historical_prices["price"].iloc[0] - 1) * 100 if not historical_prices.empty else 0
                     sharpe_ratio = (gain_pct / volatility) * np.sqrt(252) if volatility != 0 else 0
+
                     value_data = []
                     cost_basis = 0
                     for date in sorted(df["Date"].unique()):
-                        date_df = df[df["Date"] <= date]
+                        date_df = df[df["Date"] == date]
                         net_btc_date = date_df[date_df["Type"] == "IN"]["BTC"].sum() - date_df[date_df["Type"] == "OUT"]["BTC"].sum()
                         cost_basis += date_df[date_df["Type"] == "IN"]["USD Value"].sum() - date_df[date_df["Type"] == "OUT"]["USD Value"].sum()
                         date_str = pd.to_datetime(date).strftime("%d-%m-%Y")
@@ -932,12 +956,12 @@ if st.session_state.user_email:
                         value = net_btc_date * price * multiplier
                         value_data.append({"Date": date, "Market Value": value, "Cost Basis": cost_basis * multiplier})
                     value_df = pd.DataFrame(value_data)
-                    max_drawdown = ((value_df["Market Value"] - value_df["Market Value"].cummax()) / value_df["Market Value"].cummax()).min() * 100 if not value_df.empty else 0
+                    max_drawdown = (
+                        (value_df["Market Value"] - value_df["Market Value"].cummax()) / value_df["Market Value"].cummax()
+                    ).min() * 100 if not value_df.empty else 0
 
-                    # --- Tabs ---
                     tab1, tab2, tab3, tab4 = st.tabs([t("Summary"), t("Transactions"), t("Portfolio"), t("₿it Notes")])
 
-                    # --- Summary Tab ---
                     with tab1:
                         st.markdown(f"### 💼 {t('Wallet Overview')}")
                         if tx_limit == "Last 20":
@@ -977,26 +1001,32 @@ if st.session_state.user_email:
                         }
                         st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
 
-                    # --- Transactions Tab ---
                     with tab2:
                         st.markdown(f"### 📜 {t('Transaction History')}")
                         df_display = df.copy()
                         df_display["USD Value"] = df_display["USD Value"] * multiplier
-                        df_display["Price at Tx"] = df_display["Price at Tx"] * multiplier
                         df_display["Date"] = df_display["Date"].dt.strftime("%Y-%m-%d")
 
-                        date_range = st.date_input(
-                            t("Date Range"),
-                            [df["Date"].min(), df["Date"].max()],
-                            min_value=df["Date"].min(),
-                            max_value=df["Date"].max(),
-                            key="date_range"
-                        )
-
-                        filtered_df = df_display[
-                            (df_display["Date"] >= date_range[0].strftime("%Y-%m-%d")) &
-                            (df_display["Date"] <= date_range[1].strftime("%Y-%m-%d"))
-                        ]
+                        if not df.empty:
+                            date_range = st.date_input(
+                                t("Date Range"),
+                                [df["Date"].min(), df["Date"].max()],
+                                min_value=df["Date"].min(),
+                                max_value=df["Date"].max(),
+                                key="date_range"
+                            )
+                            filtered_df = df_display[
+                                (df_display["Date"] >= date_range[0].strftime("%Y-%m-%d")) &
+                                (df_display["Date"] <= date_range[1].strftime("%Y-%m-%d"))
+                            ]
+                        else:
+                            date_range = st.date_input(
+                                t("Date Range"),
+                                [date.today() - timedelta(days=30), date.today()],
+                                key="date_range",
+                                disabled=True
+                            )
+                            filtered_df = pd.DataFrame()
 
                         st.dataframe(
                             filtered_df[["Date", "Type", "BTC", "USD Value", "Price at Tx", "Txid", "Confirmed", "Counterparty"]],
@@ -1009,7 +1039,7 @@ if st.session_state.user_email:
                             csv,
                             "transactions.csv",
                             "text/csv",
-                            key="download_transactions"
+                            key="download_transactions_csv"
                         )
 
                         st.markdown(f"### 📈 {t('Transaction Volume')}")
@@ -1040,7 +1070,7 @@ if st.session_state.user_email:
                                 y=freq_df["Count"],
                                 mode="lines+markers",
                                 name=t("Transaction Count"),
-                                line=dict(color="#007BFF")
+                                line=dict(color="#FF5733")
                             )
                         )
                         fig_freq.update_layout(
@@ -1051,12 +1081,6 @@ if st.session_state.user_email:
                         )
                         st.plotly_chart(fig_freq, use_container_width=True)
 
-                        st.markdown(f"### 📊 {t('Transaction Statistics')}")
-                        col1, col2 = st.columns(2)
-                        col1.metric(t("Average BTC per Tx"), f"{filtered_df['BTC'].mean():,.8f} BTC", help=t("Average BTC per transaction"))
-                        col2.metric(f"{t('Average USD per Tx')} ({currency})", f"{filtered_df['USD Value'].mean():,.2f}", help=t("Average USD value per transaction"))
-
-                    # --- Portfolio Tab ---
                     with tab3:
                         st.markdown(f"### 📈 {t('Portfolio Performance')}")
                         fig_portfolio = go.Figure()
@@ -1090,13 +1114,12 @@ if st.session_state.user_email:
                         col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Current market price of Bitcoin"))
                         col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
 
-                    # --- Bit Notes Tab ---
                     with tab4:
                         st.markdown(f"### 📝 {t('₿it Notes')}")
-                        st.write(t("Share your thoughts on Bitcoin or track your investment notes."))
+                        st.markdown(t("Share your thoughts on Bitcoin or track your investment notes."))
 
                         with st.form("bit_notes_form"):
-                            st.subheader(t("Add a New Note"))
+                            st.subheader(t("Add Note"))
                             note_title = st.text_input(t("Note Title"), max_chars=100)
                             note_description = st.text_area(t("Description"), max_chars=500)
                             note_content = st.text_area(t("Note Content"), max_chars=1000)
@@ -1111,11 +1134,11 @@ if st.session_state.user_email:
                                             content=note_content,
                                             created_at=datetime.now(timezone.utc).isoformat()
                                         )
-                                        st.success(t("Note added successfully!"))
-                                        st.rerun()  # Refresh to show new note
+                                        st.success(t("Note saved!"))
+                                        st.rerun()
                                     except sqlite3.Error as e:
-                                        st.error(t("Failed to save note. Please try again."))
-                                        logger.error(f"Note save error: {e}")
+                                        logger.error(f"Error saving note: {e}")
+                                        st.error(t("Failed to save note."))
                                 else:
                                     st.error(t("Please fill out all fields!"))
 
@@ -1138,22 +1161,20 @@ if st.session_state.user_email:
                         else:
                             st.info(t("No notes yet. Add your first note above!"))
 
-        # --- Footer ---
-        st.markdown(
-            """
-            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
-                <hr style='border-color: #E0E0E0; margin: 20px 0;'>
-                <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
+                        st.markdown(
+                            """
+                            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
+                                <hr style='border-color: #E0E0E0; margin-bottom: 20px;'>
+                                <p style='color: #4A4A4A; font-size: 14px;'>© 2025 InfiBit Analytics. All rights reserved.</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 else:
     st.markdown(
         """
         <div style='text-align: center; margin-top: 50px;'>
-            <h1>Welcome to Infi₿it</h1>
+            <h1>Welcome to InfiBit</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
             <p style='color: #4A4A4A;'>{1}</p>
         </div>
