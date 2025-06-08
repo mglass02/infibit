@@ -20,7 +20,7 @@ import urllib.parse
 
 # Load environment variables
 load_dotenv()
-GOCARDLESS_API_KEY = os.getenv("GOCARDLESS_API_KEY") or "live_if50oanOpNbrFYBWWGx8xqCkhDSBmz_02UjX8b2E"
+GOCARDLESS_API_KEY = os.getenv("GOCARDLESS_API_KEY") 
 GOCARDLESS_PLAN_ID = "BRT0003XM6FHXA5"
 
 # Configure logging
