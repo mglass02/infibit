@@ -77,29 +77,11 @@ def init_db():
                     FOREIGN KEY (user_email) REFERENCES users(email) ON DELETE CASCADE
                 )
             """)
-
-            # --- One-time user activation ---
-            cursor.execute("SELECT subscription_status FROM users WHERE email = ?", ("michael.andrew.glass@gmail.com",))
-            row = cursor.fetchone()
-            if row and row[0] != "active":
-                cursor.execute("""
-                    UPDATE users
-                    SET subscription_status = 'active'
-                    WHERE email = ?
-                """, ("michael.andrew.glass@gmail.com",))
-                logger.info("Activated michael.andrew.glass@gmail.com")
-            elif row:
-                logger.info("User already active.")
-            else:
-                logger.warning("User michael.andrew.glass@gmail.com not found.")
-
             conn.commit()
-
         logger.info("Database initialized successfully.")
     except sqlite3.Error as e:
         logger.error(f"Error initializing database: {e}")
         raise
-
 
 def load_users():
     users = {}
