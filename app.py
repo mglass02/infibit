@@ -126,23 +126,6 @@ def migrate_users_from_json():
         except Exception as e:
             logger.error(f"Error migrating users: {e}")
 
-def debug_db():
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = [row["name"] for row in cursor.fetchall()]
-            if "users" in tables:
-                cursor.execute("SELECT * FROM users")
-                rows = cursor.fetchall()
-                return [{"username": row["username"], "email": row["email"], "wallet_address": row["wallet_address"],
-                         "password_hash": row["password_hash"][:20] + "...", "created_at": row["created_at"]} for row in rows]
-            else:
-                return []
-    except sqlite3.Error as e:
-        logger.error(f"Debug DB error: {e}")
-        return []
-
 # Initialize database and migrate existing users
 try:
     init_db()
@@ -377,7 +360,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- Sidebar: Sign-Up and Login ---
+# --- Sidebar: Sign-Up, Login, or Logout ---
 with st.sidebar:
     st.markdown(
         """
@@ -386,62 +369,61 @@ with st.sidebar:
         """,
         unsafe_allow_html=True
     )
-    tab_login, tab_signup = st.tabs([t("Login"), t("Sign Up")])
 
-    # Login Tab
-    with tab_login:
-        email = st.text_input(t("Email"), key="login_email")
-        password = st.text_input(t("Password"), type="password", key="login_password")
-        if st.button(t("Login")):
-            if email and password:
-                users = load_users()
-                user = users.get(email)
-                if user and check_password(password, user["password_hash"]):
-                    st.session_state.user_email = email
-                    st.session_state.wallet_address = user["wallet_address"]
-                    st.session_state.subscribed = check_subscription(email)
-                    st.session_state.subscription_checked = True
-                    st.success(t("Logged in successfully!"))
-                else:
-                    st.error(t("Invalid email or password."))
-            else:
-                st.error(t("Please enter email and password."))
+    if not st.session_state.user_email:
+        tab_login, tab_signup = st.tabs([t("Login"), t("Sign Up")])
 
-    # Sign-Up Tab
-    with tab_signup:
-        new_username = st.text_input(t("Username (Optional)"), key="signup_username")
-        new_email = st.text_input(t("Email"), key="signup_email")
-        new_wallet = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
-        new_password = st.text_input(t("Password"), type="password", key="signup_password")
-        if st.button(t("Sign Up")):
-            if new_email and new_wallet and new_password:
-                if not validate_wallet_address(new_wallet):
-                    st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
-                else:
+        # Login Tab
+        with tab_login:
+            email = st.text_input(t("Email"), key="login_email")
+            password = st.text_input(t("Password"), type="password", key="login_password")
+            if st.button(t("Login")):
+                if email and password:
                     users = load_users()
-                    if new_email in users:
-                        st.error(t("Email already registered."))
+                    user = users.get(email)
+                    if user and check_password(password, user["password_hash"]):
+                        st.session_state.user_email = email
+                        st.session_state.wallet_address = user["wallet_address"]
+                        st.session_state.subscribed = check_subscription(email)
+                        st.session_state.subscription_checked = True
+                        st.success(t("Logged in successfully!"))
+                        st.rerun()
                     else:
-                        try:
-                            save_user(
-                                email=new_email,
-                                username=new_username if new_username else None,
-                                wallet_address=new_wallet,
-                                password_hash=hash_password(new_password),
-                                created_at=datetime.now(timezone.utc).isoformat()
-                            )
-                            st.success(t("Signed up successfully! Please log in."))
-                            # Debug: Show database contents
-                            st.write("Debug: Current users in database:")
-                            st.dataframe(pd.DataFrame(debug_db()))
-                        except sqlite3.Error as e:
-                            st.error(t("Failed to register user. Please try again."))
-                            logger.error(f"Sign-up error: {e}")
-            else:
-                st.error(t("Please fill out email, wallet address, and password."))
+                        st.error(t("Invalid email or password."))
+                else:
+                    st.error(t("Please enter email and password."))
 
-    # Sidebar Controls (only for logged-in users)
-    if st.session_state.user_email:
+        # Sign-Up Tab
+        with tab_signup:
+            new_username = st.text_input(t("Username (Optional)"), key="signup_username")
+            new_email = st.text_input(t("Email"), key="signup_email")
+            new_wallet = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
+            new_password = st.text_input(t("Password"), type="password", key="signup_password")
+            if st.button(t("Sign Up")):
+                if new_email and new_wallet and new_password:
+                    if not validate_wallet_address(new_wallet):
+                        st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
+                    else:
+                        users = load_users()
+                        if new_email in users:
+                            st.error(t("Email already registered."))
+                        else:
+                            try:
+                                save_user(
+                                    email=new_email,
+                                    username=new_username if new_username else None,
+                                    wallet_address=new_wallet,
+                                    password_hash=hash_password(new_password),
+                                    created_at=datetime.now(timezone.utc).isoformat()
+                                )
+                                st.success(t("Signed up successfully! Please log in."))
+                            except sqlite3.Error as e:
+                                st.error(t("Failed to register user. Please try again."))
+                                logger.error(f"Sign-up error: {e}")
+                else:
+                    st.error(t("Please fill out email, wallet address, and password."))
+    else:
+        # Sidebar Controls for logged-in users
         if st.button(t("Logout")):
             st.session_state.user_email = None
             st.session_state.subscribed = False
@@ -452,10 +434,6 @@ with st.sidebar:
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
         language = LANGUAGE_OPTIONS[language_label]
         tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"))
-        # Debug: Download database
-        if os.path.exists("infibit.db"):
-            with open("infibit.db", "rb") as f:
-                st.download_button("Download Database (Debug)", f, "infibit.db")
 
 # --- Main App Logic ---
 if st.session_state.user_email:
