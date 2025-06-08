@@ -474,8 +474,8 @@ if st.session_state.user_email:
                     }
                 ],
                 mode="subscription",
-                success_url="https://your-app-name.streamlit.app/?subscribed=true",  # Replace with your app URL
-                cancel_url="https://your-app-name.streamlit.app/?subscribed=false",
+                success_url="https://infibit-terminal.streamlit.app//?subscribed=true",  # Replace with your app URL
+                cancel_url="https://infibit-terminal.streamlit.app//?subscribed=false",
                 client_reference_id=st.session_state.user_email,
             )
             st.markdown(
