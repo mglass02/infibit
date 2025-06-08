@@ -37,6 +37,7 @@ def init_db():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            # Create users table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT,
@@ -44,6 +45,18 @@ def init_db():
                     wallet_address TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                )
+            """)
+            # Create notes table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_email TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (user_email) REFERENCES users(email) ON DELETE CASCADE
                 )
             """)
             conn.commit()
@@ -97,6 +110,43 @@ def update_wallet_address(email, wallet_address):
         logger.error(f"Error updating wallet address: {e}")
         raise
 
+def save_note(user_email, title, description, content, created_at):
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO notes (user_email, title, description, content, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_email, title, description, content, created_at))
+            conn.commit()
+        logger.info(f"Note '{title}' saved for user {user_email}.")
+    except sqlite3.Error as e:
+        logger.error(f"Error saving note to database: {e}")
+        raise
+
+def load_user_notes(user_email):
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM notes WHERE user_email = ?", (user_email,))
+            rows = cursor.fetchall()
+            notes = [
+                {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "description": row["description"],
+                    "content": row["content"],
+                    "date": row["created_at"],
+                    "author": row["user_email"]
+                }
+                for row in rows
+            ]
+        logger.info(f"Loaded {len(notes)} notes for user {user_email}.")
+        return notes
+    except sqlite3.Error as e:
+        logger.error(f"Error loading notes for user {user_email}: {e}")
+        return []
+
 def migrate_users_from_json():
     if os.path.exists("users.json"):
         try:
@@ -115,12 +165,40 @@ def migrate_users_from_json():
         except Exception as e:
             logger.error(f"Error migrating users: {e}")
 
-# Initialize database and migrate existing users
+def migrate_notes_from_json():
+    if os.path.exists("bit_notes.json"):
+        try:
+            with open("bit_notes.json", "r") as f:
+                json_notes = json.load(f)
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                users = load_users()
+                for note in json_notes:
+                    user_email = note.get("author")
+                    if user_email in users:
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO notes (user_email, title, description, content, created_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (
+                            user_email,
+                            note.get("title", "Untitled"),
+                            note.get("description", ""),
+                            note.get("content", note.get("contents", "")),  # Handle old key
+                            note.get("date", datetime.now(timezone.utc).isoformat())
+                        ))
+                conn.commit()
+            logger.info(f"Migrated {len(json_notes)} notes from bit_notes.json to SQLite database.")
+            os.rename("bit_notes.json", "bit_notes.json.bak")
+        except Exception as e:
+            logger.error(f"Error migrating notes: {e}")
+
+# Initialize database and migrate existing data
 try:
     init_db()
     migrate_users_from_json()
+    migrate_notes_from_json()
 except Exception as e:
-    logger.error(f"Failed to initialize database or migrate users: {e}")
+    logger.error(f"Failed to initialize database or migrate data: {e}")
     st.error("Database initialization failed. Please check logs.")
 
 # --- Page Configuration ---
@@ -592,25 +670,6 @@ if st.session_state.user_email:
 
         return df, total_btc_in, total_btc_out, total_usd_in, total_usd_out, first_tx_date
 
-    # --- Bit Notes Storage Functions ---
-    def load_bit_notes():
-        try:
-            if os.path.exists("bit_notes.json"):
-                with open("bit_notes.json", "r") as f:
-                    notes = json.load(f)
-                return [note for note in notes if note["author"] == st.session_state.user_email]
-            return []
-        except Exception as e:
-            logger.error(f"Error loading bit notes: {e}")
-            return []
-
-    def save_bit_notes(notes):
-        try:
-            with open("bit_notes.json", "w") as f:
-                json.dump(notes, f, indent=4)
-        except Exception as e:
-            logger.error(f"Error saving bit notes: {e}")
-
     # --- Main Dashboard ---
     currency_rates = get_currency_rates()
     multiplier = currency_rates.get(currency.upper(), 1.0)
@@ -826,21 +885,24 @@ if st.session_state.user_email:
                         note_submitted = st.form_submit_button(t("Submit Note"))
                         if note_submitted:
                             if note_title and note_description and note_content:
-                                notes = load_bit_notes()
-                                notes.append({
-                                    "title": note_title,
-                                    "description": note_description,
-                                    "content": note_content,
-                                    "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                                    "author": st.session_state.user_email
-                                })
-                                save_bit_notes(notes)
-                                st.success(t("Note added successfully!"))
+                                try:
+                                    save_note(
+                                        user_email=st.session_state.user_email,
+                                        title=note_title,
+                                        description=note_description,
+                                        content=note_content,
+                                        created_at=datetime.now(timezone.utc).isoformat()
+                                    )
+                                    st.success(t("Note added successfully!"))
+                                    st.rerun()  # Refresh to show new note
+                                except sqlite3.Error as e:
+                                    st.error(t("Failed to save note. Please try again."))
+                                    logger.error(f"Note save error: {e}")
                             else:
                                 st.error(t("Please fill out all fields!"))
 
                     st.markdown(f'### 📩 {t("Your Notes")}')
-                    notes = load_bit_notes()
+                    notes = load_user_notes(st.session_state.user_email)
                     if notes:
                         for note in notes:
                             st.markdown(
