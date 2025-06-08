@@ -921,7 +921,7 @@ else:
     st.markdown(
         """
         <div style='text-align: center; margin-top: 50px;'>
-            <h1>Welcome to Infi₿it Analytics</h1>
+            <h1>Welcome to Infi₿it+</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
             <p style='color: #4A4A4A;'>{1}</p>
         </div>
