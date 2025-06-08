@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 # --- Database Functions ---
 @contextmanager
 def get_db_connection():
-    conn = sqlite3.connect("infibit.db")
+    db_path = os.getenv("DB_PATH", "infibit.db")
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -137,9 +138,10 @@ def load_user_notes(user_email):
         return []
 
 def migrate_users_from_json():
-    if os.path.exists("users.json"):
+    users_json_path = os.getenv("USERS_JSON_PATH", "users.json")
+    if os.path.exists(users_json_path):
         try:
-            with open("users.json", "r") as f:
+            with open(users_json_path, "r") as f:
                 json_users = json.load(f)
             with get_db_connection() as conn:
                 cursor = conn.cursor()
@@ -149,35 +151,36 @@ def migrate_users_from_json():
                         VALUES (?, ?, ?, ?, ?)
                     """, (email, None, data["wallet_address"], data["password_hash"], data["created_at"]))
                 conn.commit()
-            logger.info(f"Migrated {len(json_users)} users from users.json to SQLite database.")
-            os.rename("users.json", "users.json.bak")
+            logger.info(f"Migrated {len(json_users)} users from {users_json_path} to SQLite database.")
+            os.rename(users_json_path, f"{users_json_path}.bak")
         except Exception as e:
             logger.error(f"Error migrating users: {e}")
 
 def migrate_notes_from_json():
-    if os.path.exists("bit_notes.json"):
+    notes_json_path = os.getenv("NOTES_JSON_PATH", "bit_notes.json")
+    if os.path.exists(notes_json_path):
         try:
-            with open("bit_notes.json", "r") as f:
+            with open(notes_json_path, "r") as f:
                 json_notes = json.load(f)
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 users = load_users()
-                for necktie in json_notes:
+                for note in json_notes:
                     user_email = note.get("author")
                     if user_email in users:
                         cursor.execute("""
-                            INSERT OR IGNORE Dietrich notes (user_email, title, description, content, created_at)
+                            INSERT OR IGNORE INTO notes (user_email, title, description, content, created_at)
                             VALUES (?, ?, ?, ?, ?)
                         """, (
                             user_email,
                             note.get("title", "Untitled"),
                             note.get("description", ""),
-                            note.get("content", note.get("contents", "")),  # Handle old key
+                            note.get("content", note.get("contents", "")),
                             note.get("date", datetime.now(timezone.utc).isoformat())
                         ))
                 conn.commit()
-            logger.info(f"Migrated {len(json_notes)} notes from bit_notes.json to SQLite database.")
-            os.rename("bit_notes.json", "bit_notes.json.bak")
+            logger.info(f"Migrated {len(json_notes)} notes from {notes_json_path} to SQLite database.")
+            os.rename(notes_json_path, f"{notes_json_path}.bak")
         except Exception as e:
             logger.error(f"Error migrating notes: {e}")
 
@@ -211,7 +214,7 @@ LANGUAGE_OPTIONS = {
 }
 
 # --- Default Language ---
-language = "en"  # Default to English
+language = "en"
 
 # --- Translate Function ---
 def t(text):
@@ -475,9 +478,11 @@ if st.session_state.user_email:
     # --- API Functions ---
     @st.cache_data(ttl=3600)
     def get_current_btc_price():
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        url = os.getenv("COINGECKO_PRICE_API")
+        api_key = os.getenv("COINGECKO_API_KEY")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             return response.json().get("bitcoin", {}).get("usd", 0)
         except Exception as e:
@@ -491,8 +496,10 @@ if st.session_state.user_email:
         try:
             dt = datetime.strptime(date_str, '%d-%m-%Y')
             ts = int(dt.replace(tzinfo=timezone.utc).timestamp())
-            url = f"https://min-api.cryptocompare.com/data/pricehistorical?fsym=BTC&tsyms=USD&ts={ts}"
-            response = requests.get(url, timeout=10)
+            url = os.getenv("CRYPTOCOMPARE_HISTORICAL_API").format(ts=ts)
+            api_key = os.getenv("CRYPTOCOMPARE_API_KEY")
+            headers = {"Authorization": f"Apikey {api_key}"} if api_key else {}
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             price = response.json().get("BTC", {}).get("USD", 0)
             price_cache[date_str] = price
@@ -503,14 +510,14 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=3600)
     def get_wallet_balance(address):
-        url = f"https://blockstream.info/api/address/{address}"
+        url = os.getenv("BLOCKSTREAM_ADDRESS_API").format(address=address)
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             stats = response.json().get("chain_stats", {})
             funded = stats.get("funded_txo_sum", 0)
             spent = stats.get("spent_txo_sum", 0)
-            balance = (funded - spent) / 1e8  # Convert satoshis to BTC
+            balance = (funded - spent) / 1e8
             logger.info(f"Balance for {address}: {balance:.8f} BTC")
             return max(balance, 0)
         except Exception as e:
@@ -521,16 +528,17 @@ if st.session_state.user_email:
     @st.cache_data(ttl=3600)
     def get_txs_all(address):
         all_txs = []
-        url = f"https://blockstream.info/api/address/{address}/txs"
+        base_url = os.getenv("BLOCKSTREAM_TXS_API").format(address=address)
         try:
             logger.info(f"Fetching transactions for address: {address}")
             if tx_limit == "Last 20":
-                response = requests.get(url, timeout=10)
+                response = requests.get(base_url, timeout=10)
                 response.raise_for_status()
                 txs = response.json()
                 all_txs.extend(txs[:20])
                 logger.info(f"Fetched {len(all_txs)} transactions (limited to 20)")
             else:
+                url = base_url
                 while True:
                     response = requests.get(url, timeout=10)
                     response.raise_for_status()
@@ -541,8 +549,8 @@ if st.session_state.user_email:
                     if len(txs) < 25:
                         break
                     last_txid = txs[-1]['txid']
-                    url = f"https://blockstream.info/api/address/{address}/txs/chain/{last_txid}"
-                    time.sleep(1)  # Respect rate limits
+                    url = os.getenv("BLOCKSTREAM_TXS_CHAIN_API").format(address=address, last_txid=last_txid)
+                    time.sleep(1)
                 logger.info(f"Fetched {len(all_txs)} transactions (all)")
             if not all_txs:
                 logger.warning(f"No transactions found for address: {address}")
@@ -554,7 +562,7 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=3600)
     def get_tx_details(txid):
-        url = f"https://blockstream.info/api/tx/{txid}"
+        url = os.getenv("BLOCKSTREAM_TX_API").format(txid=txid)
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
@@ -565,9 +573,11 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=86400)
     def get_btc_historical_prices(days=30):
-        url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days={days}"
+        url = os.getenv("COINGECKO_HISTORICAL_API").format(days=days)
+        api_key = os.getenv("COINGECKO_API_KEY")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             prices = response.json().get("prices", [])
             return pd.DataFrame(prices, columns=["timestamp", "price"]).assign(
@@ -579,18 +589,22 @@ if st.session_state.user_email:
 
     @st.cache_data(ttl=900)
     def get_currency_rates():
-        url = "https://api.frankfurter.app/latest?from=USD&to=USD,GBP,EUR"
+        url = os.getenv("FRANKFURTER_CURRENCY_API")
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
             rates = data.get("rates", {})
             if "USD" not in rates:
-                rates["USD"] = 1.0
+                rates["USD"] = float(os.getenv("FALLBACK_USD_RATE", 1.0))
             return rates
         except Exception as e:
             logger.error(f"Error fetching currency rates: {e}")
-            return {"USD": 1.0, "GBP": 0.78, "EUR": 0.92}
+            return {
+                "USD": float(os.getenv("FALLBACK_USD_RATE", 1.0)),
+                "GBP": float(os.getenv("FALLBACK_GBP_RATE", 0.78)),
+                "EUR": float(os.getenv("FALLBACK_EUR_RATE", 0.92))
+            }
 
     # --- Stats Logic ---
     def get_wallet_stats(address):
@@ -877,7 +891,7 @@ if st.session_state.user_email:
                                         created_at=datetime.now(timezone.utc).isoformat()
                                     )
                                     st.success(t("Note added successfully!"))
-                                    st.rerun()  # Refresh to show new note
+                                    st.rerun()
                                 except sqlite3.Error as e:
                                     st.error(t("Failed to save note. Please try again."))
                                     logger.error(f"Note save error: {e}")
