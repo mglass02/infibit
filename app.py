@@ -142,7 +142,7 @@ def update_subscription_status(email, gocardless_customer_id, subscription_statu
                 UPDATE users
                 SET gocardless_customer_id = ?,
                 subscription_status = ?,
-                mandate_id = ?
+                mandate_id = ?,
                 WHERE email = ?,
             """, (gocardless_customer_id, subscription_status, mandate_id, email))
             conn.commit()
@@ -910,7 +910,7 @@ if st.session_state.user_email:
                             st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
                         col1, col2, col3, col4 = st.columns(4)
                         col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
-                        col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}"), help==t("Current market value")
+                        col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}"), help=t("Current market value")
                         col3.metric(f"{t('Profit/Loss')} ({currency})", f"{gain:,.2f}", delta=f"{gain_pct:.2f}%", help=t("Unrealized profit or loss"))
                         col4.metric(t("30-Day Volatility"), f"{volatility:.2f}%", help=t("Annualized price volatility of Bitcoin"))
 
