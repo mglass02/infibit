@@ -482,7 +482,7 @@ if st.session_state.user_email:
                 f"""
                 <div class='paywall-container'>
                     <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 10 day free trial!')}</p>
+                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 7 day free trial!')}</p>
                     <a href="{checkout_session.url}" target="_blank">
                         <button style='background-color: #007BFF; color: #FFFFFF; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;'>
                             {t('Subscribe Now')}
@@ -501,7 +501,7 @@ if st.session_state.user_email:
                 f"""
                 <div class='paywall-container'>
                     <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 10 day free trial!')}</p>
+                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 7 day free trial!')}</p>
                     <p style='color: #DC3545; font-size: 0.9em;'>{t('Payment system error. Please contact support.')}</p>
                 </div>
                 """,
@@ -514,7 +514,7 @@ if st.session_state.user_email:
                 f"""
                 <div class='paywall-container'>
                     <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 10 day free trial!')}</p>
+                    <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 7 day free trial!')}</p>
                     <p style='color: #DC3545; font-size: 0.9em;'>{t('Subscription system is temporarily unavailable.')}</p>
                 </div>
                 """,
