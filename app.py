@@ -15,7 +15,6 @@ import bcrypt
 from dotenv import load_dotenv
 import sqlite3
 from contextlib import contextmanager
-import uuid
 
 # Load environment variables
 load_dotenv()
@@ -60,16 +59,6 @@ def init_db():
                     FOREIGN KEY (user_email) REFERENCES users(email) ON DELETE CASCADE
                 )
             """)
-            # Create sessions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_token TEXT PRIMARY KEY,
-                    user_email TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL,
-                    FOREIGN KEY (user_email) REFERENCES users(email) ON DELETE CASCADE
-                )
-            """)
             conn.commit()
         logger.info("Database initialized successfully.")
     except sqlite3.Error as e:
@@ -109,53 +98,6 @@ def save_user(email, username, wallet_address, password_hash, created_at):
     except sqlite3.Error as e:
         logger.error(f"Error saving user to database: {e}")
         raise
-
-def save_session(user_email):
-    session_token = str(uuid.uuid4())
-    created_at = datetime.now(timezone.utc).isoformat()
-    expires_at = (datetime.now(timezone.utc) + pd.Timedelta(days=30)).isoformat()  # Session valid for 30 days
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO sessions (session_token, user_email, created_at, expires_at)
-                VALUES (?, ?, ?, ?)
-            """, (session_token, user_email, created_at, expires_at))
-            conn.commit()
-        logger.info(f"Session created for user {user_email}.")
-        return session_token
-    except sqlite3.Error as e:
-        logger.error(f"Error saving session for {user_email}: {e}")
-        raise
-
-def get_session(session_token):
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sessions WHERE session_token = ?", (session_token,))
-            session = cursor.fetchone()
-            if session:
-                expires_at = datetime.fromisoformat(session["expires_at"])
-                if expires_at > datetime.now(timezone.utc):
-                    return session["user_email"]
-                else:
-                    cursor.execute("DELETE FROM sessions WHERE session_token = ?", (session_token,))
-                    conn.commit()
-                    logger.info(f"Expired session {session_token} deleted.")
-            return None
-    except sqlite3.Error as e:
-        logger.error(f"Error retrieving session: {e}")
-        return None
-
-def clear_session(session_token):
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM sessions WHERE session_token = ?", (session_token,))
-            conn.commit()
-        logger.info(f"Session {session_token} cleared.")
-    except sqlite3.Error as e:
-        logger.error(f"Error clearing session: {e}")
 
 def save_note(user_email, title, description, content, created_at):
     try:
@@ -220,11 +162,11 @@ def migrate_notes_from_json():
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 users = load_users()
-                for note in json_notes:  # Fixed typo: 'necktie' to 'note'
+                for necktie in json_notes:
                     user_email = note.get("author")
                     if user_email in users:
                         cursor.execute("""
-                            INSERT OR IGNORE INTO notes (user_email, title, description, content, created_at)
+                            INSERT OR IGNORE Dietrich notes (user_email, title, description, content, created_at)
                             VALUES (?, ?, ?, ?, ?)
                         """, (
                             user_email,
@@ -300,20 +242,6 @@ if "wallet_address" not in st.session_state:
     st.session_state.wallet_address = ""
 if "username" not in st.session_state:
     st.session_state.username = ""
-if "session_token" not in st.session_state:
-    st.session_state.session_token = None
-
-# Check for existing session
-if not st.session_state.user_email and st.session_state.session_token:
-    user_email = get_session(st.session_state.session_token)
-    if user_email:
-        users = load_users()
-        user = users.get(user_email)
-        if user:
-            st.session_state.user_email = user_email
-            st.session_state.wallet_address = user["wallet_address"]
-            st.session_state.username = user["username"] or user_email
-            logger.info(f"Restored session for user {user_email}.")
 
 # --- Global CSS ---
 st.markdown(
@@ -401,7 +329,7 @@ st.markdown(
         .stDataFrame tr:nth-child(even) {
             background-color: #FAFAFA;
         }
-        .stSpinnerEf div {
+        .stSpinner div {
             color: #007BFF;
         }
         .stTabs [data-baseweb="tab"] {
@@ -468,7 +396,6 @@ with st.sidebar:
                         st.session_state.user_email = email
                         st.session_state.wallet_address = user["wallet_address"]
                         st.session_state.username = user["username"] or email
-                        st.session_state.session_token = save_session(email)
                         st.success(t("Logged in successfully!"))
                         st.rerun()
                     else:
@@ -499,12 +426,7 @@ with st.sidebar:
                                     password_hash=hash_password(new_password),
                                     created_at=datetime.now(timezone.utc).isoformat()
                                 )
-                                st.session_state.user_email = new_email
-                                st.session_state.wallet_address = new_wallet
-                                st.session_state.username = new_username or new_email
-                                st.session_state.session_token = save_session(new_email)
-                                st.success(t("Signed up and logged in successfully!"))
-                                st.rerun()
+                                st.success(t("Signed up successfully! Please log in."))
                             except sqlite3.Error as e:
                                 st.error(t("Failed to register user. Please try again."))
                                 logger.error(f"Sign-up error: {e}")
@@ -513,12 +435,9 @@ with st.sidebar:
     else:
         # Sidebar Controls for logged-in users
         if st.button(t("Logout")):
-            if st.session_state.session_token:
-                clear_session(st.session_state.session_token)
             st.session_state.user_email = None
             st.session_state.wallet_address = ""
             st.session_state.username = ""
-            st.session_state.session_token = None
             st.rerun()
         currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
@@ -772,7 +691,7 @@ if st.session_state.user_email:
                 for date in sorted(df["Date"].unique()):
                     date_df = df[df["Date"] <= date]
                     net_btc_date = date_df[date_df["Type"] == "IN"]["BTC"].sum() - date_df[date_df["Type"] == "OUT"]["BTC"].sum()
-                    cost_basis += date_df[date_df["Type"] == "INolian"].sum() - date_df[date_df["Type"] == "OUT"]["USD Value"].sum()
+                    cost_basis += date_df[date_df["Type"] == "IN"]["USD Value"].sum() - date_df[date_df["Type"] == "OUT"]["USD Value"].sum()
                     date_str = pd.to_datetime(date).strftime("%d-%m-%Y")
                     price = get_historical_price(date_str)
                     value = net_btc_date * price * multiplier
