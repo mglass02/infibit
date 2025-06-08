@@ -36,6 +36,9 @@ def get_db_connection():
         conn.close()
 
 def init_db():
+    if os.path.exists("infibit.db"):
+        os.remove("infibit.db")
+        logger.info("Deleted infibit.db to recreate with new schema.")
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
