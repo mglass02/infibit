@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timezone, date
-from datetime import timedelta  # Added for date range handling
+from datetime import timedelta
 import time
 import numpy as np
 from deep_translator import GoogleTranslator
@@ -125,7 +125,7 @@ def save_user(email, username, wallet_address, password_hash, created_at, gocard
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id)
+                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, text, gocardless_customer_id, subscription_status, mandate_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id))
             conn.commit()
@@ -140,8 +140,10 @@ def update_subscription_status(email, gocardless_customer_id, subscription_statu
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE users
-                SET gocardless_customer_id = ?, subscription_status = ?, mandate_id = ?
-                WHERE email = ?
+                SET gocardless_customer_id = ?,
+                subscription_status = ?,
+                mandate_id = ?,
+                WHERE email = ?,
             """, (gocardless_customer_id, subscription_status, mandate_id, email))
             conn.commit()
         logger.info(f"Subscription status updated for user {email}.")
@@ -196,11 +198,11 @@ def load_user_notes(user_email):
             notes = [
                 {
                     "id": row["id"] if isinstance(row, sqlite3.Row) else row[0],
-                    "title": row["title"] if isinstance(row, sqlite3.Row) else row[2],
+                    "title": row["title"] if isinstance(row, str) else row[2],
                     "description": row["description"] if isinstance(row, sqlite3.Row) else row[3],
                     "content": row["content"] if isinstance(row, sqlite3.Row) else row[4],
-                    "date": row["created_at"] if isinstance(row, sqlite3.Row) else row[5],
-                    "author": row["user_email"] if isinstance(row, sqlite3.Row) else row[1]
+                    "date": row["created_at"] if isinstance(row, str) else row[5],
+                    "author": row["user_email"] if isinstance(row, str) else row[1]
                 }
                 for row in rows
             ]
@@ -269,7 +271,10 @@ def check_subscription_status(customer_id):
     if not customer_id:
         return "inactive", None
     url = f"https://api.gocardless.com/customers/{customer_id}/mandates"
-    headers = {"Authorization": f"Bearer {GOCARDLESS_API_KEY}"}
+    headers = {
+        "Authorization": f"Bearer {GOCARDLESS_API_KEY}",
+        "GoCardless-Version": "2015-07-06"
+    }
     try:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
@@ -485,6 +490,8 @@ if "username" not in st.session_state:
     st.session_state.username = ""
 if "language" not in st.session_state:
     st.session_state.language = "en"
+if "tx_limit" not in st.session_state:
+    st.session_state.tx_limit = "Last 20"
 
 # --- Sidebar: Sign-Up, Login, or Logout ---
 with st.sidebar:
@@ -552,11 +559,12 @@ with st.sidebar:
             st.session_state.wallet_address = ""
             st.session_state.username = ""
             st.session_state.language = "en"
+            st.session_state.tx_limit = "Last 20"
             st.rerun()
         currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
         st.session_state.language = LANGUAGE_OPTIONS[language_label]
-        tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"))
+        st.session_state.tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history (slower for active wallets)"))
 
 # --- Main App Logic ---
 if st.session_state.user_email:
@@ -574,100 +582,153 @@ if st.session_state.user_email:
     if subscription_status != "active":
         if st.button(t("Subscribe to Premium")):
             try:
+                # Validate email
                 if not st.session_state.user_email or not st.session_state.user_email.strip():
                     logger.error("No valid email found in session state for subscription")
                     st.error(t("No valid email found. Please log in again."))
-
-                email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-                if not re.match(email_pattern, st.session_state.user_email):
-                    logger.error(f"Invalid email format provided for subscription: {st.session_state.user_email}")
-                    st.error(t("Invalid email format. Ensure your email is valid (e.g., user@example.com)."))
-
-                given_name = "".join(c for c in (st.session_state.username if st.session_state.username else "User") if c.isalnum() or c in " -")[:50]
-
-                encoded_email = urllib.parse.quote(st.session_state.user_email)
-                check_customer_response = requests.get(
-                    f"https://api.gocardless.com/customers?email={encoded_email}",
-                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    timeout=10
-                )
-                if check_customer_response.status_code == 200:
-                    try:
-                        existing_customers = check_customer_response.json().get("customers", [])
-                    except ValueError:
-                        logger.error(f"Invalid JSON response from GoCardless: {check_customer_response.text}")
-                        st.error(t("Failed to check customer status. Please try again."))
-                    if existing_customers:
-                        logger.warning(f"Customer already exists for email: {st.session_state.user_email}")
-                        st.error(t("A customer account already exists for this email. Please contact support."))
-
-                customer_data = {
-                    "customers": {
-                        "email": st.session_state.user_email,
-                        "given_name": given_name,
-                        "family_name": "Subscriber"
-                    }
-                }
-                customer_response = requests.post(
-                    "https://api.gocardless.com/customers",
-                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json=customer_data,
-                    timeout=10
-                )
-                if customer_response.status_code != 201:
-                    try:
-                        error_details = customer_response.json().get("error", {})
-                        error_message = error_details.get("message", "Unknown error")
-                    except ValueError:
-                        error_message = f"Invalid response from GoCardless: {customer_response.text}"
-                    logger.error(f"GoCardless customer creation failed: {customer_response.status_code} - {error_message}")
-                    st.error(f"Failed to create customer: {error_message}")
-
-                customer_id = customer_response.json().get("customers", {}).get("id")
-
-                billing_request_data = {
-                    "billing_requests": {
-                        "currency": "GBP",
-                        "mandate_request": {"scheme": "bacs"},
-                        "payment_request": {
-                            "amount": 999,
-                            "currency": "GBP",
-                            "interval_unit": "monthly",
-                            "interval": 1,
-                            "description": "InfiBit Premium Subscription"
+                else:
+                    email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+                    if not re.match(email_pattern, st.session_state.user_email):
+                        logger.error(f"Invalid email format provided for subscription: {st.session_state.user_email}")
+                        st.error(t("Invalid email format. Ensure your email is valid (e.g., user@example.com)."))
+                    else:
+                        # Prepare headers
+                        headers = {
+                            "Authorization": f"Bearer {GOCARDLESS_API_KEY}",
+                            "GoCardless-Version": "2015-07-06"
                         }
-                    }
-                }
-                billing_request_response = requests.post(
-                    "https://api.gocardless.com/billing_requests",
-                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json=billing_request_data,
-                    timeout=10
-                )
-                billing_request_response.raise_for_status()
-                billing_request_id = billing_request_response.json().get("billing_requests", {}).get("id")
 
-                customer_link_response = requests.post(
-                    f"https://api.gocardless.com/billing_requests/{billing_request_id}/actions/collect_customer_details",
-                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    json={"billing_requests": {"customer_id": customer_id}},
-                    timeout=10
-                )
-                customer_link_response.raise_for_status()
+                        # Check for existing customer
+                        encoded_email = urllib.parse.quote(st.session_state.user_email)
+                        check_customer_response = requests.get(
+                            f"https://api.gocardless.com/customers?email={encoded_email}",
+                            headers=headers,
+                            timeout=10
+                        )
+                        if check_customer_response.status_code == 200:
+                            try:
+                                existing_customers = check_customer_response.json().get("customers", [])
+                            except ValueError:
+                                logger.error(f"Invalid JSON response from GoCardless: {check_customer_response.text}")
+                                st.error(t("Failed to check customer status. Please try again."))
+                            else:
+                                if existing_customers:
+                                    logger.warning(f"Customer already exists for email: {st.session_state.user_email}")
+                                    st.error(t("A customer account already exists for this email. Please contact support."))
+                                else:
+                                    # Create customer
+                                    given_name = "".join(c for c in (st.session_state.username if st.session_state.username else "User") if c.isalnum() or c in " -")[:50]
+                                    customer_data = {
+                                        "customers": {
+                                            "email": st.session_state.user_email,
+                                            "given_name": given_name,
+                                            "family_name": "Subscriber"
+                                        }
+                                    }
+                                    customer_response = requests.post(
+                                        "https://api.gocardless.com/customers",
+                                        headers=headers,
+                                        json=customer_data,
+                                        timeout=10
+                                    )
+                                    if customer_response.status_code != 201:
+                                        try:
+                                            error_details = customer_response.json().get("error", {})
+                                            error_message = error_details.get("message", "Unknown error")
+                                        except ValueError:
+                                            error_message = f"Invalid response from GoCardless: {customer_response.text}"
+                                        logger.error(f"GoCardless customer creation failed: {customer_response.status_code} - {error_message}")
+                                        st.error(f"Failed to create customer: {error_message}")
+                                    else:
+                                        customer_id = customer_response.json().get("customers", {}).get("id")
 
-                flow_response = requests.post(
-                    f"https://api.gocardless.com/billing_requests/{billing_request_id}/actions/fulfil",
-                    headers={"Authorization": f"Bearer {GOCARDLESS_API_KEY}"},
-                    timeout=10
-                )
-                flow_response.raise_for_status()
-                redirect_url = flow_response.json().get("billing_requests", {}).get("authorisation_url")
-                st.markdown(
-                    f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px;border: none;">{t("Set Up Direct Debit")}</button></a>',
-                    unsafe_allow_html=True
-                )
-                update_subscription_status(st.session_state.user_email, customer_id, "pending", None)
-                st.info(t("Please complete the direct debit setup. Your subscription will activate within 3–5 days."))
+                                        # Create billing request
+                                        billing_request_data = {
+                                            "billing_requests": {
+                                                "currency": "GBP",
+                                                "mandate_request": {
+                                                    "scheme": "bacs"
+                                                }
+                                            }
+                                        }
+                                        billing_request_response = requests.post(
+                                            "https://api.gocardless.com/billing_requests",
+                                            headers=headers,
+                                            json=billing_request_data,
+                                            timeout=10
+                                        )
+                                        if billing_request_response.status_code != 201:
+                                            try:
+                                                error_details = billing_request_response.json().get("error", {})
+                                                error_message = error_details.get("message", "Unknown error")
+                                            except ValueError:
+                                                error_message = f"Invalid response from GoCardless: {billing_request_response.text}"
+                                            logger.error(f"GoCardless billing request failed: {billing_request_response.status_code} - {error_message}")
+                                            st.error(f"Failed to create billing request: {error_message}")
+                                        else:
+                                            billing_request_id = billing_request_response.json().get("billing_requests", {}).get("id")
+
+                                            # Link customer to billing request
+                                            customer_link_response = requests.post(
+                                                f"https://api.gocardless.com/billing_requests/{billing_request_id}/actions/collect_customer_details",
+                                                headers=headers,
+                                                json={"billing_requests": {"customer_id": customer_id}},
+                                                timeout=10
+                                            )
+                                            if customer_link_response.status_code != 200:
+                                                logger.error(f"Customer link failed: {customer_link_response.status_code} - {customer_link_response.text}")
+                                                st.error(t("Failed to link customer to billing request. Please try again."))
+                                            else:
+                                                # Fulfill billing request
+                                                flow_response = requests.post(
+                                                    f"https://api.gocardless.com/billing_requests/{billing_request_id}/actions/fulfil",
+                                                    headers=headers,
+                                                    timeout=10
+                                                )
+                                                if flow_response.status_code != 200:
+                                                    logger.error(f"Billing request fulfilment failed: {flow_response.status_code} - {flow_response.text}")
+                                                    st.error(t("Failed to initiate payment flow. Please try again."))
+                                                else:
+                                                    mandate_id = flow_response.json().get("billing_requests", {}).get("mandate_request", {}).get("id")
+                                                    redirect_url = flow_response.json().get("billing_requests", {}).get("authorisation_url")
+
+                                                    # Create subscription
+                                                    subscription_data = {
+                                                        "subscriptions": {
+                                                            "amount": 999,
+                                                            "currency": "GBP",
+                                                            "interval_unit": "monthly",
+                                                            "interval": 1,
+                                                            "name": "InfiBit Premium Subscription",
+                                                            "links": {
+                                                                "mandate": mandate_id
+                                                            },
+                                                            "metadata": {
+                                                                "plan_id": GOCARDLESS_PLAN_ID
+                                                            }
+                                                        }
+                                                    }
+                                                    subscription_response = requests.post(
+                                                        "https://api.gocardless.com/subscriptions",
+                                                        headers=headers,
+                                                        json=subscription_data,
+                                                        timeout=10
+                                                    )
+                                                    if subscription_response.status_code != 201:
+                                                        try:
+                                                            error_details = subscription_response.json().get("error", {})
+                                                            error_message = error_details.get("message", "Unknown error")
+                                                        except ValueError:
+                                                            error_message = f"Invalid response from GoCardless: {subscription_response.text}"
+                                                        logger.error(f"GoCardless subscription creation failed: {subscription_response.status_code} - {error_message}")
+                                                        st.error(f"Failed to create subscription: {error_message}")
+                                                    else:
+                                                        st.markdown(
+                                                            f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px;border: none;">{t("Set Up Direct Debit")}</button></a>',
+                                                            unsafe_allow_html=True
+                                                        )
+                                                        update_subscription_status(st.session_state.user_email, customer_id, "pending", mandate_id)
+                                                        st.info(t("Please complete the direct debit setup. Your subscription will activate within 3–5 days."))
             except requests.HTTPError as e:
                 error_response = e.response.json() if e.response else {}
                 logger.error(f"GoCardless API error: {e}, Response: {error_response}")
@@ -724,7 +785,7 @@ if st.session_state.user_email:
             <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 20px;'>
                 <h3>{t("User Information")}</h3>
                 <p><strong>{t("Username")}:</strong> {st.session_state.username}</p>
-                <p><strong>{t("Bitcoin Wallet Address")}:</strong> {st.session_state.wallet_address}</p>
+                <p><strong>{t("Bitcoin Wallet")}:</strong> {st.session_state.wallet_address}</p>
                 <p style='color: #4A4A4A; font-size: 0.9em;'>{t("Wallet address is set at signup. Changing it is a premium feature.")}</p>
             </div>
             """,
@@ -775,7 +836,6 @@ if st.session_state.user_email:
                 return max(balance, 0)
             except Exception as e:
                 logger.error(f"Error fetching balance for {address}: {e}")
-                st.error(t("Failed to fetch wallet balance."))
                 return 0
 
         @st.cache_data(ttl=3600)
@@ -784,7 +844,7 @@ if st.session_state.user_email:
             url = f"https://blockstream.info/api/address/{address}/txs"
             try:
                 logger.info(f"Fetching transactions for address: {address}")
-                if tx_limit == "Last 20":
+                if st.session_state.tx_limit == "Last 20":
                     response = requests.get(url, timeout=10)
                     response.raise_for_status()
                     txs = response.json()
@@ -809,7 +869,6 @@ if st.session_state.user_email:
                 return all_txs
             except Exception as e:
                 logger.error(f"Error fetching transactions for {address}: {e}")
-                st.error(t("Failed to fetch transactions. Please try again later."))
                 return []
 
         @st.cache_data(ttl=3600)
@@ -919,8 +978,12 @@ if st.session_state.user_email:
             with st.container():
                 with st.spinner(t("Loading wallet insights...")):
                     df, total_btc_in, total_btc_out, usd_in, usd_out, first_tx_date = get_wallet_stats(st.session_state.wallet_address)
+                    if isinstance(df, pd.DataFrame) and df.empty:
+                        st.warning(t("No transactions found for this wallet."))
                     current_price_usd = get_current_btc_price()
                     net_btc = get_wallet_balance(st.session_state.wallet_address)
+                    if net_btc == 0 and not isinstance(df, pd.DataFrame):
+                        st.error(t("Failed to fetch wallet balance. Please try again later."))
 
                     current_price = current_price_usd * multiplier
                     net_usd = usd_in - usd_out
@@ -949,7 +1012,7 @@ if st.session_state.user_email:
                     cost_basis = 0
                     for date in sorted(df["Date"].unique()):
                         date_df = df[df["Date"] == date]
-                        net_btc_date = date_df[date_df["Type"] == "IN"]["BTC"].sum() - date_df[date_df["Type"] == "OUT"]["BTC"].sum()
+                        net_btc_date = date_df[date_df["Type"] == "IN"]["BTC"].sum() / date_df[date_df["Type"] == "OUT"]["BTC"].sum()
                         cost_basis += date_df[date_df["Type"] == "IN"]["USD Value"].sum() - date_df[date_df["Type"] == "OUT"]["USD Value"].sum()
                         date_str = pd.to_datetime(date).strftime("%d-%m-%Y")
                         price = get_historical_price(date_str)
@@ -964,7 +1027,7 @@ if st.session_state.user_email:
 
                     with tab1:
                         st.markdown(f"### 💼 {t('Wallet Overview')}")
-                        if tx_limit == "Last 20":
+                        if st.session_state.tx_limit == "Last 20":
                             st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
                         col1, col2, col3, col4 = st.columns(4)
                         col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
@@ -1111,7 +1174,7 @@ if st.session_state.user_email:
                         st.markdown(f"### 📊 {t('Performance Metrics')}")
                         col1, col2, col3 = st.columns(3)
                         col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Return on investment"))
-                        col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Current market price of Bitcoin"))
+                        col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Current market price"))
                         col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
 
                     with tab4:
@@ -1122,7 +1185,7 @@ if st.session_state.user_email:
                             st.subheader(t("Add Note"))
                             note_title = st.text_input(t("Note Title"), max_chars=100)
                             note_description = st.text_area(t("Description"), max_chars=500)
-                            note_content = st.text_area(t("Note Content"), max_chars=1000)
+                            note_content = st.text_area(t("Content"), max_chars=1000)
                             note_submitted = st.form_submit_button(t("Submit Note"))
                             if note_submitted:
                                 if note_title and note_description and note_content:
@@ -1163,7 +1226,7 @@ if st.session_state.user_email:
 
                         st.markdown(
                             """
-                            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
+                            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F5F5; border-radius: 8px;'>
                                 <hr style='border-color: #E0E0E0; margin-bottom: 20px;'>
                                 <p style='color: #4A4A4A; font-size: 14px;'>© 2025 InfiBit Analytics. All rights reserved.</p>
                             </div>
