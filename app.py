@@ -193,7 +193,7 @@ st.set_page_config(
     page_title="InfiBit | Bitcoin Wallet Dashboard",
     layout="wide",
     page_icon="₿",
-    initial_sidebar_state="expanded",  # Sidebar visible by default
+    initial_sidebar_state="collapsed",
 )
 
 # --- Language Map ---
@@ -203,7 +203,7 @@ LANGUAGE_OPTIONS = {
     "German 🇩🇪": "de",
     "Spanish 🇪🇸": "es",
     "Italian 🇮🇹": "it",
-    "Dutch 🇺🇱": "nl",
+    "Dutch 🇳🇱": "nl",
     "Polish 🇵🇱": "pl",
     "Portuguese 🇵🇹": "pt",
 }
@@ -353,17 +353,16 @@ st.markdown(
         .sidebar .sidebar-content {
             background-color: #FFFFFF;
             padding: 16px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
         .stTextInput div, .stTextInput input, .stTextInput textarea {
             border: none;
-            border-radius: 8px;
-            padding: 12px;
-            font-size: 1.1em;
-            background-color: #F5F5F7;
+            border-bottom: 2px solid #CCCCCC;
+            border-radius: 0;
+            padding: 8px;
+            font-size: 1em;
         }
         .stTextInput div:focus, .stTextInput input:focus, .stTextInput textarea:focus {
-            background-color: #E8ECEF;
+            border-bottom: 2px solid #007AFF;
             box-shadow: none;
         }
         .stSelectbox div {
@@ -394,9 +393,6 @@ st.markdown(
             }
             .stMetric {
                 padding: 12px;
-            }
-            .stTextInput div, .stTextInput input, .stTextInput textarea {
-                font-size: 1em;
             }
         }
     </style>
@@ -803,7 +799,8 @@ if st.session_state.user_email:
                         file_name="transactions.csv",
                         mime="text/csv",
                         use_container_width=True,
-                        key="download_transactions"
+                        key="download_transactions",
+                        args=('class="secondary-button"',)
                     )
 
                     with st.container():
