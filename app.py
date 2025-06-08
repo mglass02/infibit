@@ -44,6 +44,19 @@ def get_db_connection():
 
 def init_db():
     try:
+        def activate_michael():
+            email = "michael.andrew.glass@gmail.com"
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE users
+                    SET subscription_status = 'active'
+                    WHERE email = ?
+                """, (email,))
+                conn.commit()
+                logger.info(f"Activated subscription for {email}")
+
+        activate_michael()
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
