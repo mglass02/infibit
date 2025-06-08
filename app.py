@@ -39,19 +39,28 @@ def init_db():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            # Create users table with subscription fields
+            # Create users table with minimal columns if it doesn't exist
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT,
                     email TEXT PRIMARY KEY,
                     wallet_address TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    gocardless_customer_id TEXT,
-                    subscription_status TEXT,
-                    mandate_id TEXT
+                    created_at TEXT NOT NULL
                 )
             """)
+            # Check for missing columns and add them
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "gocardless_customer_id" not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN gocardless_customer_id TEXT")
+                logger.info("Added gocardless_customer_id column to users table.")
+            if "subscription_status" not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN subscription_status TEXT")
+                logger.info("Added subscription_status column to users table.")
+            if "mandate_id" not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN mandate_id TEXT")
+                logger.info("Added mandate_id column to users table.")
             # Create notes table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
@@ -83,9 +92,9 @@ def load_users():
                     "wallet_address": row["wallet_address"],
                     "password_hash": row["password_hash"],
                     "created_at": row["created_at"],
-                    "gocardless_customer_id": row["gocardless_customer_id"],
-                    "subscription_status": row["subscription_status"],
-                    "mandate_id": row["mandate_id"]
+                    "gocardless_customer_id": row.get("gocardless_customer_id", None),
+                    "subscription_status": row.get("subscription_status", None),
+                    "mandate_id": row.get("mandate_id", None)
                 }
         logger.info(f"Loaded {len(users)} users from database.")
         return users
@@ -1099,9 +1108,9 @@ if st.session_state.user_email:
         # --- Footer ---
         st.markdown(
             """
-            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
+            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5;'>
                 <hr style='border-color: #E0E0E0; margin: 20px 0;'>
-                <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
+                <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics.</p>
             </div>
             """,
             unsafe_allow_html=True
@@ -1110,13 +1119,13 @@ if st.session_state.user_email:
 else:
     st.markdown(
         """
-        <div style='text-align: center; margin-top: 50px;'>
-            <h1>Welcome to Infi₿it+</h1>
+        <div style='text-align: center;'>
+            <h1>Welcome</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
             <p style='color: #4A4A4A;'>{1}</p>
         </div>
         """.format(
-            t("Monitor your Bitcoin wallet with real-time insights"),
+            t("monitor your wallet with insights"),
             t("Please sign up or log in to access the dashboard.")
         ),
         unsafe_allow_html=True
