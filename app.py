@@ -37,6 +37,7 @@ def init_db():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            # Create users table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT,
@@ -46,6 +47,7 @@ def init_db():
                     created_at TEXT NOT NULL
                 )
             """)
+            # Create notes table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,17 +162,17 @@ def migrate_notes_from_json():
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 users = load_users()
-                for note in json_notes:
+                for necktie in json_notes:
                     user_email = note.get("author")
                     if user_email in users:
                         cursor.execute("""
-                            INSERT OR IGNORE INTO notes (user_email, title, description, content, created_at)
+                            INSERT OR IGNORE Dietrich notes (user_email, title, description, content, created_at)
                             VALUES (?, ?, ?, ?, ?)
                         """, (
                             user_email,
                             note.get("title", "Untitled"),
                             note.get("description", ""),
-                            note.get("content", note.get("contents", "")),
+                            note.get("content", note.get("contents", "")),  # Handle old key
                             note.get("date", datetime.now(timezone.utc).isoformat())
                         ))
                 conn.commit()
@@ -209,7 +211,7 @@ LANGUAGE_OPTIONS = {
 }
 
 # --- Default Language ---
-language = "en"
+language = "en"  # Default to English
 
 # --- Translate Function ---
 def t(text):
@@ -250,23 +252,21 @@ st.markdown(
             background-color: #FFFFFF;
             color: #1A1A1A;
             font-family: 'Inter', sans-serif;
-            font-size: 0.95em;
-            line-height: 1.5;
             margin: 0;
             padding: 0;
         }
         .main {
-            padding: 24px;
+            padding: 20px;
             max-width: 1400px;
             margin: 0 auto;
         }
         .stMetric {
             background-color: #FFFFFF;
-            border: 1px solid #E5E7EB;
+            border: 1px solid #E0E0E0;
             border-radius: 8px;
-            padding: 16px;
+            padding: 15px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-            margin-bottom: 16px;
+            margin-bottom: 15px;
             transition: transform 0.2s;
         }
         .stMetric:hover {
@@ -285,42 +285,30 @@ st.markdown(
             font-weight: 700;
             color: #1A1A1A;
         }
-        h1 {
-            font-size: 2.4em;
-            font-weight: 700;
+        h1, h2, h3 {
+            font-family: 'Inter', sans-serif;
             color: #1A1A1A;
-            margin-bottom: 12px;
+            font-weight: 700;
+        }
+        h1 {
+            font-size: 2.2em;
+            margin-bottom: 10px;
         }
         h2 {
-            font-size: 1.7em;
-            font-weight: 600;
-            color: #1A1A1A;
-            margin: 24px 0 12px;
-        }
-        h3 {
-            font-size: 1.3em;
-            font-weight: 600;
-            color: #1A1A1A;
-            margin: 16px 0 8px;
+            font-size: 1.5em;
+            margin: 20px 0 10px;
         }
         .stButton>button {
             border-radius: 6px;
             background-color: #007BFF;
             color: #FFFFFF;
             font-weight: 500;
-            padding: 10px 20px;
+            padding: 8px 16px;
             border: none;
             transition: background-color 0.2s;
         }
         .stButton>button:hover {
             background-color: #0056b3;
-        }
-        .secondary-button>button {
-            background-color: #6B7280;
-            color: #FFFFFF;
-        }
-        .secondary-button>button:hover {
-            background-color: #4B5563;
         }
         .stDataFrame table {
             border-collapse: collapse;
@@ -330,59 +318,32 @@ st.markdown(
         .stDataFrame th {
             background-color: #F5F6F5;
             color: #1A1A1A;
-            padding: 14px;
+            padding: 12px;
             text-align: left;
             font-weight: 600;
-            border-bottom: 1px solid #E5E7EB;
         }
         .stDataFrame td {
-            padding: 14px;
-            border-bottom: 1px solid #E5E7EB;
+            padding: 12px;
+            border-bottom: 1px solid #E0E0E0;
         }
         .stDataFrame tr:nth-child(even) {
             background-color: #FAFAFA;
-        }
-        .stDataFrame tr:hover {
-            background-color: #F1F5F9;
         }
         .stSpinner div {
             color: #007BFF;
         }
         .stTabs [data-baseweb="tab"] {
-            font-size: 1.1em;
+            font-size: 1em;
             font-weight: 500;
-            padding: 12px 24px;
+            padding: 10px 20px;
             color: #4A4A4A;
-            border-bottom: 2px solid transparent;
         }
         .stTabs [data-baseweb="tab"]:hover {
             color: #007BFF;
-            border-bottom: 2px solid #007BFF;
-        }
-        .stTabs [aria-selected="true"] {
-            color: #007BFF;
-            border-bottom: 2px solid #007BFF;
         }
         .sidebar .sidebar-content {
             background-color: #FFFFFF;
             box-shadow: 2px 0 5px rgba(0,0,0,0.05);
-            padding: 20px;
-        }
-        .stTextInput div, .stTextInput input, .stTextInput textarea {
-            border: none;
-            background-color: #F3F4F6;
-            border-radius: 6px;
-            padding: 12px;
-            font-size: 0.95em;
-        }
-        .stTextInput div:focus, .stTextInput input:focus, .stTextInput textarea:focus {
-            background-color: #E5E7EB;
-            box-shadow: none;
-        }
-        .stSelectbox div {
-            border: 1px solid #E5E7EB;
-            border-radius: 6px;
-            padding: 8px;
         }
         a {
             color: #007BFF;
@@ -391,33 +352,18 @@ st.markdown(
         a:hover {
             text-decoration: underline;
         }
-        .card {
-            border: 1px solid #E5E7EB;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 20px;
-            background-color: #FFFFFF;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
         @media (max-width: 768px) {
             .main {
-                padding: 12px;
-            }
-            h1 {
-                font-size: 2em;
-            }
-            h2 {
-                font-size: 1.5em;
+                padding: 10px;
             }
             .stMetric {
-                padding: 12px;
-                margin-bottom: 12px;
-            }
-            .stButton>button {
-                padding: 8px 16px;
-            }
-            .stDataFrame th, .stDataFrame td {
                 padding: 10px;
+            }
+            h1 {
+                font-size: 1.8em;
+            }
+            h2 {
+                font-size: 1.3em;
             }
         }
     </style>
@@ -429,7 +375,7 @@ st.markdown(
 with st.sidebar:
     st.markdown(
         """
-        <hr style='border-color: #E5E7EB; margin: 12px 0;'>
+        <hr style='border-color: #E0E0E0; margin: 10px 0;'>
         <h3 style='color: #1A1A1A; font-family: Inter, sans-serif;'>InfiBit Analytics</h3>
         """,
         unsafe_allow_html=True
@@ -438,10 +384,11 @@ with st.sidebar:
     if not st.session_state.user_email:
         tab_login, tab_signup = st.tabs([t("Login"), t("Sign Up")])
 
+        # Login Tab
         with tab_login:
-            email = st.text_input(t("Email"), placeholder=t("Enter your email"), key="login_email")
-            password = st.text_input(t("Password"), type="password", placeholder=t("Enter your password"), key="login_password")
-            if st.button(t("Login"), use_container_width=True):
+            email = st.text_input(t("Email"), key="login_email")
+            password = st.text_input(t("Password"), type="password", key="login_password")
+            if st.button(t("Login")):
                 if email and password:
                     users = load_users()
                     user = users.get(email)
@@ -456,12 +403,13 @@ with st.sidebar:
                 else:
                     st.error(t("Please enter email and password."))
 
+        # Sign-Up Tab
         with tab_signup:
-            new_username = st.text_input(t("Username (Optional)"), placeholder=t("Enter your username"), key="signup_username")
-            new_email = st.text_input(t("Email"), placeholder=t("Enter your email"), key="signup_email")
-            new_wallet = st.text_input(t("Bitcoin Wallet Address"), placeholder=t("Enter your wallet address"), key="signup_wallet")
-            new_password = st.text_input(t("Password"), type="password", placeholder=t("Enter your password"), key="signup_password")
-            if st.button(t("Sign Up"), use_container_width=True):
+            new_username = st.text_input(t("Username (Optional)"), key="signup_username")
+            new_email = st.text_input(t("Email"), key="signup_email")
+            new_wallet = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
+            new_password = st.text_input(t("Password"), type="password", key="signup_password")
+            if st.button(t("Sign Up")):
                 if new_email and new_wallet and new_password:
                     if not validate_wallet_address(new_wallet):
                         st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
@@ -473,7 +421,7 @@ with st.sidebar:
                             try:
                                 save_user(
                                     email=new_email,
-                                    username=new_username if new_username else "",
+                                    username=new_username if new_username else None,
                                     wallet_address=new_wallet,
                                     password_hash=hash_password(new_password),
                                     created_at=datetime.now(timezone.utc).isoformat()
@@ -485,7 +433,8 @@ with st.sidebar:
                 else:
                     st.error(t("Please fill out email, wallet address, and password."))
     else:
-        if st.button(t("Logout"), use_container_width=True):
+        # Sidebar Controls for logged-in users
+        if st.button(t("Logout")):
             st.session_state.user_email = None
             st.session_state.wallet_address = ""
             st.session_state.username = ""
@@ -499,7 +448,7 @@ with st.sidebar:
 if st.session_state.user_email:
     st.markdown(
         """
-        <div style='text-align: center; margin: 32px 0;'>
+        <div style='text-align: center; margin: 30px 0;'>
             <h1>Infi₿it Wallet Dashboard</h1>
             <p style='color: #4A4A4A; font-size: 1em;'>{0}</p>
         </div>
@@ -510,7 +459,7 @@ if st.session_state.user_email:
     # Display Username and Wallet Address
     st.markdown(
         f"""
-        <div class='card'>
+        <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 20px;'>
             <h3>{t('User Information')}</h3>
             <p><strong>{t('Username')}:</strong> {st.session_state.username}</p>
             <p><strong>{t('Bitcoin Wallet Address')}:</strong> {st.session_state.wallet_address}</p>
@@ -561,7 +510,7 @@ if st.session_state.user_email:
             stats = response.json().get("chain_stats", {})
             funded = stats.get("funded_txo_sum", 0)
             spent = stats.get("spent_txo_sum", 0)
-            balance = (funded - spent) / 1e8
+            balance = (funded - spent) / 1e8  # Convert satoshis to BTC
             logger.info(f"Balance for {address}: {balance:.8f} BTC")
             return max(balance, 0)
         except Exception as e:
@@ -593,7 +542,7 @@ if st.session_state.user_email:
                         break
                     last_txid = txs[-1]['txid']
                     url = f"https://blockstream.info/api/address/{address}/txs/chain/{last_txid}"
-                    time.sleep(1)
+                    time.sleep(1)  # Respect rate limits
                 logger.info(f"Fetched {len(all_txs)} transactions (all)")
             if not all_txs:
                 logger.warning(f"No transactions found for address: {address}")
@@ -615,17 +564,17 @@ if st.session_state.user_email:
             return {}
 
     @st.cache_data(ttl=86400)
-    def get_btc_historical_prices():
-        url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=30"
+    def get_btc_historical_prices(days=30):
+        url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days={days}"
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             prices = response.json().get("prices", [])
             return pd.DataFrame(prices, columns=["timestamp", "price"]).assign(
-                date=lambda x: pd.to_datetime(x["timestamp"], unit="ms")
+                date=lambda x: pd.to_datetime(x["timestamp"], unit="ms").dt.date
             )
         except Exception as e:
-            logger.error(f"Error retrieving historical BTC prices: {e}")
+            logger.error(f"Error fetching historical BTC prices: {e}")
             return pd.DataFrame()
 
     @st.cache_data(ttl=900)
@@ -636,21 +585,19 @@ if st.session_state.user_email:
             response.raise_for_status()
             data = response.json()
             rates = data.get("rates", {})
-            rates["USD"] = 1.0
+            if "USD" not in rates:
+                rates["USD"] = 1.0
             return rates
         except Exception as e:
-            logger.error(f"Error retrieving currency rates: {e}")
+            logger.error(f"Error fetching currency rates: {e}")
             return {"USD": 1.0, "GBP": 0.78, "EUR": 0.92}
 
-    # --- Statistics Logic ---
+    # --- Stats Logic ---
     def get_wallet_stats(address):
         txs = get_txs_all(address)
         data = []
         total_btc_in = total_btc_out = total_usd_in = total_usd_out = 0
         first_tx_date = None
-
-        if not txs:
-            return pd.DataFrame(columns=["Date", "Type", "BTC", "USD Price at Tx", "USD Value", "TXID", "Confirmed", "Counterparty"]), 0, 0, 0, 0, None
 
         for tx in txs:
             txid = tx.get("txid")
@@ -666,7 +613,9 @@ if st.session_state.user_email:
             btc_price = get_historical_price(date_str)
             confirmed = detail.get("status", {}).get("confirmed", False)
 
+            # Calculate BTC received (outputs to address)
             btc_in = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
+            # Calculate BTC spent (inputs from address, excluding change)
             btc_out = 0
             for vin in detail.get("vin", []):
                 prevout = vin.get("prevout", {})
@@ -674,6 +623,7 @@ if st.session_state.user_email:
                     input_value = prevout.get("value", 0) / 1e8
                     change_value = sum(v.get("value", 0) for v in detail.get("vout", []) if v.get("scriptpubkey_address") == address) / 1e8
                     btc_out += max(0, input_value - change_value)
+            # Counterparties
             counterparties = [vin.get("prevout", {}).get("scriptpubkey_address") for vin in detail.get("vin", []) if vin.get("prevout", {}).get("scriptpubkey_address") != address] or \
                              [v.get("scriptpubkey_address") for v in detail.get("vout", []) if v.get("scriptpubkey_address") != address]
             counterparty = counterparties[0] if counterparties else "N/A"
@@ -682,19 +632,21 @@ if st.session_state.user_email:
                 usd_in = btc_in * btc_price
                 total_btc_in += btc_in
                 total_usd_in += usd_in
-                data.append([date, "IN", btc_in, btc_price, usd_in, txid, confirmed, counterparty])
+                data.append([date_str, "IN", btc_in, btc_price, usd_in, txid, confirmed, counterparty])
             if btc_out > 0:
                 usd_out = btc_out * btc_price
                 total_btc_out += btc_out
                 total_usd_out += usd_out
-                data.append([date, "OUT", btc_out, btc_price, usd_out, txid, confirmed, counterparty])
+                data.append([date_str, "OUT", btc_out, btc_price, usd_out, txid, confirmed, counterparty])
 
-        df = pd.DataFrame(data, columns=["Date", "Type", "BTC", "USD Price at Tx", "USD Value", "TXID", "Confirmed", "Counterparty"])
+            logger.debug(f"Tx {txid}: IN={btc_in:.8f}, OUT={btc_out:.8f}, Price={btc_price}")
+
+        df = pd.DataFrame(data, columns=["Date", "Type", "BTC", "Price at Tx", "USD Value", "TXID", "Confirmed", "Counterparty"])
         if not df.empty:
-            df["Date"] = pd.to_datetime(df["Date"])
+            df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%Y")
             df["Type"] = df["Type"].astype(str)
             df["BTC"] = df["BTC"].astype(float)
-            df["USD Price at Tx"] = df["USD Price at Tx"].astype(float)
+            df["Price at Tx"] = df["Price at Tx"].astype(float)
             df["USD Value"] = df["USD Value"].astype(float)
         else:
             logger.warning(f"No transaction data for address: {address}")
@@ -714,15 +666,16 @@ if st.session_state.user_email:
 
                 current_price = current_price_usd * multiplier
                 net_usd = usd_in - usd_out
-                wallet_value = net_btc * current_price
-                invested = net_usd * multiplier if net_usd > 0 else 0
+                wallet_value_usd = net_btc * current_price_usd
+                wallet_value = wallet_value_usd * multiplier
+                invested = net_usd * multiplier if net_usd > 0 else wallet_value
                 gain = wallet_value - invested
                 gain_pct = (gain / invested) * 100 if invested != 0 else 0
                 avg_buy = invested / net_btc if net_btc != 0 else 0
 
                 if net_btc < 0:
                     logger.error(f"Negative balance detected: {net_btc:.8f} BTC")
-                    st.error(t("Invalid balance detected: Negative balance. Please try fetching all transactions."))
+                    st.error(t("Error: Negative balance detected. Please try fetching all transactions."))
                     net_btc = 0
                     wallet_value = 0
                     gain = 0
@@ -735,11 +688,11 @@ if st.session_state.user_email:
                 sharpe_ratio = (gain_pct / volatility) * np.sqrt(252) if volatility != 0 else 0
                 value_data = []
                 cost_basis = 0
-                for date in sorted(df["Date"].unique()) if not df.empty else []:
+                for date in sorted(df["Date"].unique()):
                     date_df = df[df["Date"] <= date]
                     net_btc_date = date_df[date_df["Type"] == "IN"]["BTC"].sum() - date_df[date_df["Type"] == "OUT"]["BTC"].sum()
                     cost_basis += date_df[date_df["Type"] == "IN"]["USD Value"].sum() - date_df[date_df["Type"] == "OUT"]["USD Value"].sum()
-                    date_str = date.strftime("%d-%m-%Y")
+                    date_str = pd.to_datetime(date).strftime("%d-%m-%Y")
                     price = get_historical_price(date_str)
                     value = net_btc_date * price * multiplier
                     value_data.append({"Date": date, "Market Value": value, "Cost Basis": cost_basis * multiplier})
@@ -747,276 +700,173 @@ if st.session_state.user_email:
                 max_drawdown = ((value_df["Market Value"] - value_df["Market Value"].cummax()) / value_df["Market Value"].cummax()).min() * 100 if not value_df.empty else 0
 
                 # --- Tabs ---
-                tab1, tab2, tab3, tab4 = st.tabs([f"💸 {t('Summary')}", f"📜 {t('Transactions')}", f"📈 {t('Portfolio')}", f"📝 {t('₿it Notes')}"])
+                tab1, tab2, tab3, tab4 = st.tabs([t("Summary"), t("Transactions"), t("Portfolio"), t("₿it Notes")])
 
                 # --- Summary Tab ---
                 with tab1:
-                    st.markdown(f"<h2>{t('Wallet Overview')}</h2>", unsafe_allow_html=True)
+                    st.markdown(f"### 💼 {t('Wallet Overview')}")
                     if tx_limit == "Last 20":
-                        st.warning(t("Note: Metrics based on last 20 transactions. Select 'All' for full accuracy."), icon="⚠️")
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        col1, col2, col3, col4 = st.columns(4, gap="medium")
-                        col1.metric(
+                        st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
+                    col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
+                    col3.metric(f"{t('Profit/Loss')} ({currency})", f"{gain:,.2f}", delta=f"{gain_pct:.2f}%", help=t("Unrealized profit or loss"))
+                    col4.metric(t("30-Day Volatility"), f"{volatility:.2f}%", help=t("Annualized price volatility of Bitcoin"))
+
+                    col5, col6, col7, col8 = st.columns(4)
+                    col5.metric(f"{t('Average Buy Price')} ({currency})", f"{avg_buy:,.2f}", help=t("Average price paid per Bitcoin"))
+                    col6.metric(f"{t('Total Invested')} ({currency})", f"{invested:,.2f}", help=t("Total amount invested"))
+                    col7.metric(t("Holding Period"), f"{holding_period_days} days", help=t("Days since first transaction"))
+                    col8.metric(t("Sharpe Ratio"), f"{sharpe_ratio:.2f}", help=t("Risk-adjusted return"))
+
+                    st.markdown(f"### 📊 {t('Summary Metrics')}")
+                    summary_data = {
+                        t("Metric"): [
                             t("Bitcoin Balance"),
-                            f"{net_btc:.2f} BTC",
-                            help=t("Total Bitcoin held in your wallet. Calculated as: Total Received BTC − Total Sent BTC, sourced from blockchain data.")
-                        )
-                        col2.metric(
-                            t(f"Current Value ({currency})"),
+                            t("Current Value"),
+                            t("Total Invested"),
+                            t("Profit/Loss"),
+                            t("ROI"),
+                            t("Volatility"),
+                            t("Sharpe Ratio")
+                        ],
+                        t("Value"): [
+                            f"{net_btc:.8f} BTC",
                             f"{currency} {wallet_value:,.2f}",
-                            help=t("Market value of your Bitcoin balance in {currency}. Calculated as: Bitcoin Balance × Current BTC Price (USD) × Currency Multiplier.").format(currency=currency)
-                        )
-                        col3.metric(
-                            t(f"Profit/Loss ({currency})"),
-                            f"{currency} {gain:,.2f}",
-                            delta=f"{gain_pct:.2f}%",
-                            help=t("Unrealized profit/loss in {currency}. Calculated as: Current Value − Total Invested. Percentage is relative to invested amount.").format(currency=currency)
-                        )
-                        col4.metric(
-                            t("30-Day Volatility"),
-                            f"{volatility:.2f}%",
-                            help=t("Volatility (%): Annualized volatility of Bitcoin’s price over last 30 days. Calculated as: Standard Deviation of Daily Price Returns (%) × √252 × 100.")
-                        )
-
-                        col5, col6, col7, col8 = st.columns(4, gap="medium")
-                        col5.metric(
-                            t(f"Average Buy Price ({currency})"),
-                            f"{currency} {avg_buy:,.2f}",
-                            help=t("Average price paid per Bitcoin in {currency}. Calculated as: Total Invested ÷ Total Bitcoin Received.").format(currency=currency)
-                        )
-                        col6.metric(
-                            t(f"Total Invested ({currency})"),
                             f"{currency} {invested:,.2f}",
-                            help=t("Net amount spent to acquire Bitcoin in {currency}. Calculated as: Sum of (BTC Received × Price at Purchase) − Sum of (BTC Sent × Price at Sale)).").format(currency=currency)
-                        )
-                        col7.metric(
-                            t("Holding Period"),
-                            f"{holding_period_days} days",
-                            help=t("Days since your first wallet transaction. Calculated as: Current Date − Date of First Transaction.")
-                        )
-                        col8.metric(
-                            t("Sharpe Ratio"),
-                            f"{sharpe_ratio:.2f}",
-                            help=t("Risk-adjusted return of your investment. Calculated as: (Portfolio Return % ÷ Volatility %) × √252. Higher values indicate better risk-adjusted returns.")
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
-
-                    st.markdown(f"<h3>{t('Summary Metrics')}</h3>", unsafe_allow_html=True)
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        summary_data = pd.DataFrame({
-                            t("Metric"): [
-                                t("Bitcoin Balance"),
-                                t("Current Value"),
-                                t("Total Invested"),
-                                t("Profit/Loss"),
-                                t("ROI (%)"),
-                                t("Volatility (%)"),
-                                t("Sharpe Ratio")
-                            ],
-                            t("Value"): [
-                                f"{net_btc:.2f} BTC",
-                                f"{currency} {wallet_value:,.2f}",
-                                f"{currency} {invested:,.2f}",
-                                f"{currency} {gain:,.2f}",
-                                f"{gain_pct:.2f}%",
-                                f"{volatility:.2f}%",
-                                f"{sharpe_ratio:.2f}"
-                            ]
-                        })
-                        st.dataframe(summary_data, use_container_width=True, hide_index=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
+                            f"{currency} {gain:,.2f}",
+                            f"{gain_pct:.2f}%",
+                            f"{volatility:.2f}%",
+                            f"{sharpe_ratio:.2f}"
+                        ]
+                    }
+                    st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
 
                 # --- Transactions Tab ---
                 with tab2:
-                    st.markdown(f"<h2>{t('Transaction History')}</h2>", unsafe_allow_html=True)
+                    st.markdown(f"### 📜 {t('Transaction History')}")
                     df_display = df.copy()
                     df_display["USD Value"] = df_display["USD Value"] * multiplier
-                    df_display["USD Price at Tx"] = df_display["USD Price at Tx"] * multiplier
+                    df_display["Price at Tx"] = df_display["Price at Tx"] * multiplier
                     df_display["Date"] = df_display["Date"].dt.strftime("%Y-%m-%d")
 
-                    if not df.empty:
-                        date_range = st.date_input(
-                            t("Date Range:"),
-                            value=[df["Date"].dt.date.min(), df["Date"].dt.date.max()],
-                            min_value=df["Date"].dt.date.min(),
-                            max_value=df["Date"].dt.date.max(),
-                            key="date_range",
-                            help=t("Select a date range to filter transactions.")
-                        )
-                    else:
-                        date_range = st.date_input(
-                            t("Date Range:"),
-                            value=[datetime.now(timezone.utc).date(), datetime.now(timezone.utc).date()],
-                            key="date_range",
-                            help=t("Select a date range to filter transactions.")
-                        )
+                    date_range = st.date_input(
+                        t("Date Range"),
+                        [df["Date"].min(), df["Date"].max()],
+                        min_value=df["Date"].min(),
+                        max_value=df["Date"].max(),
+                        key="date_range"
+                    )
 
                     filtered_df = df_display[
                         (df_display["Date"] >= date_range[0].strftime("%Y-%m-%d")) &
                         (df_display["Date"] <= date_range[1].strftime("%Y-%m-%d"))
                     ]
 
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        st.dataframe(
-                            filtered_df,
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    st.dataframe(
+                        filtered_df[["Date", "Type", "BTC", "USD Value", "Price at Tx", "TXID", "Confirmed", "Counterparty"]],
+                        use_container_width=True
+                    )
 
-                    with st.container():
-                        st.markdown("<div class='secondary-button'>", unsafe_allow_html=True)
-                        csv = filtered_df.to_csv(index=False)
-                        st.download_button(
-                            t("Download CSV"),
-                            csv,
-                            "transactions.csv",
-                            "text/csv",
-                            use_container_width=True,
-                            key="download_csv"
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    csv = filtered_df.to_csv(index=False)
+                    st.download_button(
+                        t("Download Transactions as CSV"),
+                        csv,
+                        "transactions.csv",
+                        "text/csv",
+                        key="download_transactions"
+                    )
 
-                    st.markdown(f"<h3>{t('Transaction Volume')}</h3>", unsafe_allow_html=True)
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        volume_df = filtered_df.groupby("Date")["BTC"].sum().reset_index()
-                        fig_volume = go.Figure()
-                        fig_volume.add_trace(
-                            go.Bar(
-                                x=volume_df["Date"],
-                                y=volume_df["BTC"],
-                                name=t("Volume"),
-                                marker_color="#007BFF"
-                            )
+                    st.markdown(f"### 📊 {t('Transaction Volume')}")
+                    volume_df = filtered_df.groupby("Date")["BTC"].sum().reset_index()
+                    fig_volume = go.Figure()
+                    fig_volume.add_trace(
+                        go.Bar(
+                            x=volume_df["Date"],
+                            y=volume_df["BTC"],
+                            name=t("BTC Volume"),
+                            marker_color="#007BFF"
                         )
-                        fig_volume.update_layout(
-                            title_text="",
-                            xaxis_title=t("Date"),
-                            yaxis_title=t("Volume (BTC)"),
-                            template="plotly_white",
-                            showlegend=False,
-                            margin=dict(l=20, r=40, t=20, b=20)
-                        )
-                        st.plotly_chart(fig_volume, use_container_width=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    )
+                    fig_volume.update_layout(
+                        title=t("Transaction Volume Over Time"),
+                        xaxis_title=t("Date"),
+                        yaxis_title=t("BTC"),
+                        template="plotly_white"
+                    )
+                    st.plotly_chart(fig_volume, use_container_width=True)
 
-                    st.markdown(f"<h3>{t('Transaction Frequency')}</h3>", unsafe_allow_html=True)
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        freq_df = filtered_df.groupby("Date")["TXID"].count().reset_index()
-                        fig_freq = go.Figure()
-                        fig_freq.add_trace(
-                            go.Scatter(
-                                x=freq_df["Date"],
-                                y=freq_df["TXID"],
-                                mode="lines+markers",
-                                name=t("Count"),
-                                line=dict(color="#007BFF")
-                            )
+                    st.markdown(f'### 📈 {t("Transaction Frequency")}')
+                    freq_df = filtered_df.groupby("Date")["TXID"].count().reset_index()
+                    fig_freq = go.Figure()
+                    fig_freq.add_trace(
+                        go.Scatter(
+                            x=freq_df["Date"],
+                            y=freq_df["TXID"],
+                            mode="lines+markers",
+                            name=t("Transaction Count"),
+                            line=dict(color="#007BFF")
                         )
-                        fig_freq.update_layout(
-                            title_text="",
-                            xaxis_title=t("Date"),
-                            yaxis_title=t("Number of Transactions"),
-                            template="plotly_white",
-                            showlegend=False,
-                            margin=dict(l=20, r=40, t=20, b=20)
-                        )
-                        st.plotly_chart(fig_freq, use_container_width=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    )
+                    fig_freq.update_layout(
+                        title=t("Transaction Frequency Over Time"),
+                        xaxis_title=t("Date"),
+                        yaxis_title=t("Number of Transactions"),
+                        template="plotly_white"
+                    )
+                    st.plotly_chart(fig_freq, use_container_width=True)
 
-                    st.markdown(f"<h3>{t('Transaction Statistics')}</h3>", unsafe_allow_html=True)
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        col1, col2 = st.columns(2, gap="medium")
-                        col1.metric(
-                            t("Average BTC per Transaction"),
-                            f"{filtered_df['BTC'].mean():.2f} BTC" if not filtered_df.empty else "0.0 BTC",
-                            help=t("Average Bitcoin amount per transaction. Calculated as: Sum of Transaction Amounts (BTC) ÷ Number of Transactions.")
-                        )
-                        col2.metric(
-                            t(f"Average {currency} per Transaction"),
-                            f"{currency} {filtered_df['USD Value'].mean():,.2f}" if not filtered_df.empty else f"{currency} 0.00",
-                            help=t("Average transaction value in {currency}. Calculated as: Sum of Transaction Values (USD) × Currency Multiplier ÷ Number of Transactions.").format(currency=currency)
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown(f'### 📉 {t("Transaction Statistics")}')
+                    col1, col2 = st.columns(2)
+                    col1.metric(t("Average BTC per Tx"), f"{filtered_df['BTC'].mean():,.8f} BTC", help=t("Average BTC per transaction"))
+                    col2.metric(f"{t('Average USD per Tx')} ({currency})", f"{filtered_df['USD Value'].mean():,.2f}", help=t("Average USD value per transaction"))
 
                 # --- Portfolio Tab ---
                 with tab3:
-                    st.markdown(f"<h2>{t('Portfolio Performance')}</h2>", unsafe_allow_html=True)
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        fig_portfolio = go.Figure()
-                        fig_portfolio.add_trace(
-                            go.Scatter(
-                                x=value_df["Date"],
-                                y=value_df["Market Value"],
-                                name=t("Market Value"),
-                                line=dict(color="#007BFF")
-                            )
+                    st.markdown(f'### 📈 {t("Portfolio Performance")}')
+                    fig_portfolio = go.Figure()
+                    fig_portfolio.add_trace(
+                        go.Scatter(
+                            x=value_df["Date"],
+                            y=value_df["Market Value"],
+                            name=t("Market Value"),
+                            line=dict(color="#007BFF")
                         )
-                        fig_portfolio.add_trace(
-                            go.Scatter(
-                                x=value_df["Date"],
-                                y=value_df["Cost Basis"],
-                                name=t("Cost Basis"),
-                                line=dict(color="#FF5733")
-                            )
+                    )
+                    fig_portfolio.add_trace(
+                        go.Scatter(
+                            x=value_df["Date"],
+                            y=value_df["Cost Basis"],
+                            name=t("Cost Basis"),
+                            line=dict(color="#FF5733")
                         )
-                        fig_portfolio.update_layout(
-                            title_text="",
-                            xaxis_title=t("Date"),
-                            yaxis_title=f"{currency}",
-                            template="plotly_white",
-                            showlegend=True,
-                            legend=dict(
-                                orientation="h",
-                                yanchor="bottom",
-                                y=1.05,
-                                xanchor="right",
-                                x=1
-                            ),
-                            margin=dict(l=20, r=40, t=40, b=20)
-                        )
-                        st.plotly_chart(fig_portfolio, use_container_width=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    )
+                    fig_portfolio.update_layout(
+                        title=t("Portfolio Value vs. Cost Basis"),
+                        xaxis_title=t("Date"),
+                        yaxis_title=f"{currency}",
+                        template="plotly_white"
+                    )
+                    st.plotly_chart(fig_portfolio, use_container_width=True)
 
-                    st.markdown(f"<h3>{t('Performance Metrics')}</h3>", unsafe_allow_html=True)
-                    with st.container():
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
-                        col1, col2, col3 = st.columns(3, gap="medium")
-                        col1.metric(
-                            t("ROI (%)"),
-                            f"{gain_pct:.2f}%",
-                            help=t("Return on Investment (%). Calculated as: ((Current Value − Total Invested) ÷ Total Invested × 100.)")
-                        )
-                        col2.metric(
-                            t(f"Current BTC Price ({currency})"),
-                            f"{currency} {current_price:,.2f}",
-                            help=t("Current Bitcoin price in {currency}. Sourced from CoinGecko API and converted using currency rates.").format(currency=currency)
-                        )
-                        col3.metric(
-                            t("Max Drawdown (%)"),
-                            f"{max_drawdown:.2f}%",
-                            help=t("Maximum percentage drop in portfolio value (%). Calculated as: Min(((Market Value − Peak Value) ÷ Peak Value) × 100.)")
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown(f'### 📊 {t("Performance Metrics")}')
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Return on investment"))
+                    col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Current market price of Bitcoin"))
+                    col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
 
-                # --- ₿it Notes Tab ---
+                # --- Bit Notes Tab ---
                 with tab4:
-                    st.markdown(f"<h2>{t('₿it Notes')}</h2>", unsafe_allow_html=True)
+                    st.markdown(f'### 📝 {t("₿it Notes")}')
                     st.write(t("Share your thoughts on Bitcoin or track your investment notes."))
-                    with st.form("notes_form", clear_on_submit=True):
-                        st.markdown("<div class='card'>", unsafe_allow_html=True)
+
+                    with st.form("bit_notes_form"):
                         st.subheader(t("Add a New Note"))
-                        note_title = st.text_input("", placeholder=t("Note Title"), max_chars=100, key="note_title")
-                        note_description = st.text_area("", placeholder=t("Description"), max_chars=500, key="note_description")
-                        note_content = st.text_area("", placeholder=t("Content"), max_chars=1000, key="note_content")
-                        if st.form_submit_button(t("Submit Note"), use_container_width=True):
+                        note_title = st.text_input(t("Note Title"), max_chars=100)
+                        note_description = st.text_area(t("Description"), max_chars=500)
+                        note_content = st.text_area(t("Note Content"), max_chars=1000)
+                        note_submitted = st.form_submit_button(t("Submit Note"))
+                        if note_submitted:
                             if note_title and note_description and note_content:
                                 try:
                                     save_note(
@@ -1027,42 +877,40 @@ if st.session_state.user_email:
                                         created_at=datetime.now(timezone.utc).isoformat()
                                     )
                                     st.success(t("Note added successfully!"))
-                                    st.rerun()
+                                    st.rerun()  # Refresh to show new note
                                 except sqlite3.Error as e:
                                     st.error(t("Failed to save note. Please try again."))
                                     logger.error(f"Note save error: {e}")
                             else:
                                 st.error(t("Please fill out all fields!"))
-                        st.markdown("</div>", unsafe_allow_html=True)
 
-                    st.markdown(f"<h3>{t('Your Notes')}</h3>", unsafe_allow_html=True)
+                    st.markdown(f'### 📩 {t("Your Notes")}')
                     notes = load_user_notes(st.session_state.user_email)
                     if notes:
                         for note in notes:
-                            with st.expander(f"{note['title']}", expanded=False):
-                                st.markdown(
-                                    f"""
-                                    <div class='card'>
-                                        <p><strong>{t('Title')}:</strong> {note['title']}</p>
-                                        <p><strong>{t('Description')}:</strong> {note['description']}</p>
-                                        <p><strong>{t('Content')}:</strong> {note['content']}</p>
-                                        <p><strong>{t('Date')}:</strong> {note['date']}</p>
-                                        <p><strong>{t('Author')}:</strong> {note['author']}</p>
-                                    </div>
-                                    """,
-                                    unsafe_allow_html=True
-                                )
+                            st.markdown(
+                                f"""
+                                <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 10px;'>
+                                    <h4>{note['title']}</h4>
+                                    <p><strong>{t('Description')}:</strong> {note['description']}</p>
+                                    <p><strong>{t('Content')}:</strong> {note['content']}</p>
+                                    <p><strong>{t('Date')}:</strong> {note['date']}</p>
+                                    <p><strong>{t('Author')}:</strong> {note['author']}</p>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
                     else:
-                        st.info(t("No notes yet. Add your first note above!"), icon="ℹ️")
+                        st.info(t("No notes yet. Add your first note above!"))
 
     else:
-        st.warning(t("Please log in to view your wallet insights."), icon="⚠️")
+        st.warning(t("Please log in to view your wallet insights."))
 
     # --- Footer ---
     st.markdown(
         """
-        <div class='card'>
-            <hr style='border-color: #E5E7EB; margin: 20px 0'>
+        <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F6F5; border-radius: 8px;'>
+            <hr style='border-color: #E0E0E0; margin: 20px 0;'>
             <p style='color: #4A4A4A; font-size: 0.9em;'>© 2025 InfiBit Analytics. All rights reserved.</p>
         </div>
         """,
@@ -1072,8 +920,8 @@ if st.session_state.user_email:
 else:
     st.markdown(
         """
-        <div style='text-align: center; margin: 64px 0;'>
-            <h1>Welcome to Infi₿it Analytics!</h1>
+        <div style='text-align: center; margin-top: 50px;'>
+            <h1>Welcome to Infi₿it Analytics</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
             <p style='color: #4A4A4A;'>{1}</p>
         </div>
