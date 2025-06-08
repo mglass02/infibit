@@ -11,7 +11,6 @@ import json
 import os
 import re
 import logging
-import stripe
 import bcrypt
 from dotenv import load_dotenv
 import sqlite3
@@ -23,16 +22,6 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# --- Stripe Configuration ---
-STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-
-# Validate Stripe keys early
-if not STRIPE_PUBLISHABLE_KEY or not stripe.api_key:
-    logger.error("Stripe keys are not configured: Publishable=%s, Secret=%s",
-                 STRIPE_PUBLISHABLE_KEY, stripe.api_key[:4] + "****" if stripe.api_key else None)
-    raise ValueError("Stripe API keys are missing. Set STRIPE_PUBLISHABLE_KEY and STRIPE_SECRET_KEY in Streamlit Cloud Secrets.")
 
 # --- Database Functions ---
 @contextmanager
@@ -167,22 +156,6 @@ def t(text):
         logger.error(f"Translation error: {e}")
         return text
 
-# --- Subscription Check ---
-def check_subscription(email):
-    try:
-        customers = stripe.Customer.list(email=email, limit=1)
-        if not customers.data:
-            return False
-        customer = customers.data[0]
-        subscriptions = stripe.Subscription.list(customer=customer.id, status="active", limit=1)
-        return len(subscriptions.data) > 0
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"Error checking subscription: {e}")
-        return False
-
 # --- Password Hashing ---
 def hash_password(password):
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -198,14 +171,10 @@ def validate_wallet_address(address):
 # --- Initialize Session State ---
 if "user_email" not in st.session_state:
     st.session_state.user_email = None
-if "subscribed" not in st.session_state:
-    st.session_state.subscribed = False
 if "wallet_address" not in st.session_state:
     st.session_state.wallet_address = ""
-if "subscription_checked" not in st.session_state:
-    st.session_state.subscription_checked = False
 
-# --- Global CSS with Blur Effect ---
+# --- Global CSS ---
 st.markdown(
     """
     <style>
@@ -221,33 +190,6 @@ st.markdown(
             padding: 20px;
             max-width: 1400px;
             margin: 0 auto;
-        }
-        .blur-overlay {
-            filter: blur(8px);
-            pointer-events: none;
-            opacity: 0.6;
-        }
-        .paywall-container {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            background-color: rgba(255, 255, 255, 0.9);
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            z-index: 1000;
-            width: 90%;
-            max-width: 500px;
-        }
-        .paywall-container h2 {
-            font-size: 1.8em;
-            margin-bottom: 20px;
-        }
-        .paywall-container p {
-            color: #4A4A4A;
-            margin-bottom: 20px;
         }
         .stMetric {
             background-color: #FFFFFF;
@@ -384,10 +326,6 @@ with st.sidebar:
                     if user and check_password(password, user["password_hash"]):
                         st.session_state.user_email = email
                         st.session_state.wallet_address = user["wallet_address"]
-                        # PAYWALL_BYPASS: Set subscribed to True to disable paywall for testing
-                        # Original: st.session_state.subscribed = check_subscription(email)
-                        st.session_state.subscribed = True
-                        st.session_state.subscription_checked = True
                         st.success(t("Logged in successfully!"))
                         st.rerun()
                     else:
@@ -428,9 +366,7 @@ with st.sidebar:
         # Sidebar Controls for logged-in users
         if st.button(t("Logout")):
             st.session_state.user_email = None
-            st.session_state.subscribed = False
             st.session_state.wallet_address = ""
-            st.session_state.subscription_checked = False
             st.rerun()
         currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
@@ -439,93 +375,6 @@ with st.sidebar:
 
 # --- Main App Logic ---
 if st.session_state.user_email:
-    # PAYWALL_BYPASS: Paywall logic commented out to allow full access for testing
-    # To re-enable paywall, uncomment lines below and comment out the dashboard code until the else block
-    # if not st.session_state.subscribed:
-    #     # Apply blur to main content
-    #     st.markdown("<div class='blur-overlay'>", unsafe_allow_html=True)
-    #     
-    #     # Render placeholder content (blurred)
-    #     st.markdown(
-    #         """
-    #         <div style='text-align: center; margin: 30px 0;'>
-    #             <h1>Infi₿it Wallet Dashboard</h1>
-    #             <p style='color: #4A4A4A; font-size: 1em;'>{0}</p>
-    #         </div>
-    #         """.format(t("Monitor your Bitcoin wallet with real-time insights")),
-    #         unsafe_allow_html=True
-    #     )
-    #     with st.form("wallet_form"):
-    #         wallet_input = st.text_input(
-    #             t("Bitcoin Wallet Address"),
-    #             value=st.session_state.wallet_address,
-    #             help=t("Enter a valid Bitcoin address starting with 'bc1', '1', or '3'"),
-    #             key="wallet_input",
-    #             disabled=True
-    #         )
-    #         st.form_submit_button(t("Load Wallet Data"), disabled=True)
-    #     
-    #     st.markdown("</div>", unsafe_allow_html=True)
-    #
-    #     # Paywall overlay with Stripe Checkout
-    #     try:
-    #         checkout_session = stripe.checkout.Session.create(
-    #             payment_method_types=["card"],
-    #             line_items=[
-    #                 {
-    #                     "price": "price_1RX6SQP91qk5UbUa0oV14iLB",  # Replace with your Stripe Price ID
-    #                     "quantity": 1,
-    #                 }
-    #             ],
-    #             mode="subscription",
-    #             success_url="https://infibit-terminal.streamlit.app/?subscribed=true",  # Replace with your app URL
-    #             cancel_url="https://infibit-terminal.streamlit.app/?subscribed=false",
-    #             client_reference_id=st.session_state.user_email,
-    #         )
-    #         st.markdown(
-    #             f"""
-    #             <div class='paywall-container'>
-    #                 <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-    #                 <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 7 day free trial!')}</p>
-    #                 <a href="{checkout_session.url}" target="_blank">
-    #                     <button style='background-color: #007BFF; color: #FFFFFF; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;'>
-    #                         {t('Subscribe Now')}
-    #                     </button>
-    #                 </a>
-    #                 <p style='margin-top: 20px; color: #4A4A4A; font-size: 0.9em;'>{t('After subscribing, re-login to activate your account.')}</p>
-    #             </div>
-    #             """,
-    #             unsafe_allow_html=True
-    #         )
-    #         logger.info(f"Stripe Checkout Session created successfully: {checkout_session.id}, URL: {checkout_session.url}")
-    #     except stripe.error.StripeError as e:
-    #         logger.error(f"Stripe error creating checkout session: {e}")
-    #         st.error(t("Failed to initialize payment. Please try again or contact support."))
-    #         st.markdown(
-    #             f"""
-    #             <div class='paywall-container'>
-    #                 <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-    #                 <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 7 day free trial!')}</p>
-    #                 <p style='color: #DC3545; font-size: 0.9em;'>{t('Payment system error. Please contact support.')}</p>
-    #             </div>
-    #             """,
-    #             unsafe_allow_html=True
-    #         )
-    #     except Exception as e:
-    #         logger.error(f"Unexpected error creating checkout session: {e}")
-    #         st.error(t("Unable to load subscription system. Please try again later or contact support."))
-    #         st.markdown(
-    #             f"""
-    #             <div class='paywall-container'>
-    #                 <h2>{t('Subscribe to InfiBit Analytics')}</h2>
-    #                 <p>{t('Unlock full access to the Bitcoin Wallet Dashboard with our 7 day free trial!')}</p>
-    #                 <p style='color: #DC3545; font-size: 0.9em;'>{t('Subscription system is temporarily unavailable.')}</p>
-    #             </div>
-    #             """,
-    #             unsafe_allow_html=True
-    #         )
-    # else:
-    # Render the full app for all logged-in users (paywall bypassed)
     st.markdown(
         """
         <div style='text-align: center; margin: 30px 0;'>
@@ -748,7 +597,8 @@ if st.session_state.user_email:
         try:
             if os.path.exists("bit_notes.json"):
                 with open("bit_notes.json", "r") as f:
-                    return json.load(f)
+                    notes = json.load(f)
+                return [note for note in notes if note["author"] == st.session_state.user_email]
             return []
         except Exception as e:
             logger.error(f"Error loading bit notes: {e}")
@@ -818,7 +668,7 @@ if st.session_state.user_email:
                     col1, col2, col3, col4 = st.columns(4)
                     col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
                     col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
-                    col3.metric(f"{t('Profit/Loss')} ({currency})", f"{gain:,.2f}", delta=f"{fee:.2f}%", help=t("Unrealized profit or loss"))
+                    col3.metric(f"{t('Profit/Loss')} ({currency})", f"{gain:,.2f}", delta=f"{gain_pct:.2f}%", help=t("Unrealized profit or loss"))
                     col4.metric(t("30-Day Volatility"), f"{volatility:.2f}%", help=t("Annualized price volatility of Bitcoin"))
 
                     col5, col6, col7, col8 = st.columns(4)
@@ -859,7 +709,7 @@ if st.session_state.user_email:
                     df_display["Date"] = df_display["Date"].dt.strftime("%Y-%m-%d")
 
                     date_range = st.date_input(
-                        t("Filter by Date Range"),
+                        t("Date Range"),
                         [df["Date"].min(), df["Date"].max()],
                         min_value=df["Date"].min(),
                         max_value=df["Date"].max(),
@@ -926,7 +776,7 @@ if st.session_state.user_email:
 
                     st.markdown(f'### 📉 {t("Transaction Statistics")}')
                     col1, col2 = st.columns(2)
-                    col1.metric(t("Average BTC per Tx"), f"{filtered_df['BTC'].mean():.8f} BTC", help=t("Average BTC per transaction"))
+                    col1.metric(t("Average BTC per Tx"), f"{filtered_df['BTC'].mean():,.8f} BTC", help=t("Average BTC per transaction"))
                     col2.metric(f"{t('Average USD per Tx')} ({currency})", f"{filtered_df['USD Value'].mean():,.2f}", help=t("Average USD value per transaction"))
 
                 # --- Portfolio Tab ---
@@ -987,9 +837,9 @@ if st.session_state.user_email:
                                 save_bit_notes(notes)
                                 st.success(t("Note added successfully!"))
                             else:
-                                st.error(t("Please fill out all fields."))
+                                st.error(t("Please fill out all fields!"))
 
-                    st.markdown(f'### 📚 {t("Your Notes")}')
+                    st.markdown(f'### 📩 {t("Your Notes")}')
                     notes = load_bit_notes()
                     if notes:
                         for note in notes:
