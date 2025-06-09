@@ -512,7 +512,7 @@ with st.sidebar:
     st.markdown(
         """
         <hr style='border-color: #E0E0E0; margin: 10px 0;'>
-        <h3 style='color: #1A1A1A; font-family: Inter, sans-serif;'>InfiBit Analytics</h3>
+        <h3 style='color: #1A1A1A; font-family: Inter, sans-serif;'>Infi₿it Analytics</h3>
         """,
         unsafe_allow_html=True
     )
@@ -659,7 +659,7 @@ if st.session_state.user_email:
                 st.session_state.wallet_address,
                 t("Wallet address is set at signup. Changing it is a premium feature coming soon."),
                 t("Unlock Full Access"),
-                t("Subscribe to InfiBit Analytics Premium for £10/month to access all features.")
+                t("Subscribe to Infi₿it+ for £10/month to access all features.")
             ),
             unsafe_allow_html=True
         )
@@ -1112,7 +1112,7 @@ else:
     st.markdown(
         """
         <div style='text-align: center; margin-top: 50px;'>
-            <h1>Welcome to InfiBit</h1>
+            <h1>Welcome to Infi₿it+</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
             <p style='color: #4A4A4A'>{1}</p>
         </div>
