@@ -76,7 +76,7 @@ def init_db_socket():
                     user_email TEXT NOT NULL,
                     title TEXT NOT NULL,
                     description TEXT NOT NULL,
-                    content TEXT NOT NULL,
+                    content TEXT NOT NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (user_email) REFERENCES users(email) ON DELETE CASCADE
                 )
@@ -124,21 +124,6 @@ def load_users():
     except sqlite3.Error as e:
         logger.error(f"Error loading users: {e}")
         return {}
-
-def save_user(email, username, wallet_address, password_hash, created_at, gocardless_customer_id=None, subscription_status=None, mandate_id=None, subscription_start_date=None):
-    """Save a new user to the database."""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id, subscription_start_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id, subscription_start_date))
-            conn.commit()
-        logger.info(f"User {email} saved successfully")
-    except sqlite3.Error as e:
-        logger.error(f"Error saving user {email}: {e}")
-        raise
 
 def update_subscription_status(email, gocardless_customer_id=None, subscription_status=None, mandate_id=None, subscription_start_date=None):
     """Update subscription details for a user."""
@@ -412,10 +397,9 @@ st.markdown(
             padding: 4px 12px;
             border-bottom: 2px solid #E0E0E0;
         }
-        }
         .stDataFrame tr:nth-child(even) {
             background-color: #FAFAFA;
-            }
+        }
         .stSpinner div {
             color: #007BFF;
         }
@@ -599,40 +583,12 @@ if st.session_state.user_email:
         )
 
     if subscription_status != "active":
-        if st.button(t("Subscribe to Premium")):
-            try:
-                # Validate email
-                if not st.session_state.user_email or not st.session_state.user_email.strip():
-                    logger.error("No valid email in session state")
-                    st.error(t("No valid email found. Please log in again."))
-                else:
-                    email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-                    if not re.match(email_pattern, st.session_state.user_email):
-                        logger.error(f"Invalid email format: {st.session_state.user_email}")
-                        st.error(t("Invalid email format. Ensure your email is valid (e.g., user@example.com)."))
-                    else:
-                        # Set subscription to active immediately
-                        update_subscription_status(
-                            st.session_state.user_email,
-                            gocardless_customer_id=None,
-                            subscription_status="active",
-                            mandate_id=None,
-                            subscription_start_date=datetime.now(timezone.utc).isoformat()
-                        )
-                        logger.info(f"Activated premium access for user {st.session_state.user_email}")
-
-                        # Display GoCardless button
-                        redirect_url = "https://pay.gocardless.com/BRT0003XM6FHXA5"
-                        st.markdown(
-                            f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px; border: none;">{t("Set Up Direct Debit")}</button></a>',
-                            unsafe_allow_html=True
-                        )
-                        st.success(t("Premium access activated! Please complete the direct debit setup to continue your subscription."))
-                        st.warning(t("Access granted instantly. If payment setup fails, access may be revoked."))
-                        st.rerun()  # Refresh to show premium content
-            except Exception as e:
-                logger.error(f"Error initiating subscription for {st.session_state.user_email}: {e}")
-                st.error(t("Failed to initiate subscription. Please try again or contact support."))
+        # Display Subscribe button that links directly to GoCardless
+        redirect_url = "https://pay.gocardless.com/BRT0003XM6FHXA5"
+        st.markdown(
+            f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px; border: none;">{t("Subscribe to Premium")}</button></a>',
+            unsafe_allow_html=True
+        )
         st.markdown(
             """
             <div class='blur'>
@@ -920,7 +876,8 @@ if st.session_state.user_email:
                         (value_df["Market Value"] - value_df["Market Value"].cummax()) / value_df["Market Value"].cummax()
                     ).min() * 100 if not value_df.empty else 0
 
-                    tab1, tab2, tab3, tab4 = st.tabs([t("Summary"), t("Transactions"), t("Portfolio"), t("₿it Notes")])
+                    # Removed "₿it Notes" tab
+                    tab1, tab2, tab3 = st.tabs([t("Summary"), t("Transactions"), t("Portfolio")])
 
                     with tab1:
                         st.markdown(f"### 💼 {t('Wallet Overview')}")
