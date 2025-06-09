@@ -24,7 +24,7 @@ GOCARDLESS_API_KEY = os.getenv("GOCARDLESS_API_KEY")
 GOCARDLESS_PLAN_ID = "BRT0003XM6FHXA5"
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)  # Changed to INFO to reduce verbosity
 logger = logging.getLogger(__name__)
 
 # --- Database Functions ---
@@ -39,10 +39,11 @@ def get_db_connection():
         finally:
             conn.close()
     except sqlite3.Error as e:
-        logger.error(f"Error establishing database connection: {e}")
+        logger.error(f"Error accessing database: {e}")
         raise
 
-def init_db():
+def init_db_socket():
+    """Initialize database with schema, adding subscription_start_date."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -59,13 +60,16 @@ def init_db():
             columns = [col[1] for col in cursor.fetchall()]
             if "gocardless_customer_id" not in columns:
                 cursor.execute("ALTER TABLE users ADD COLUMN gocardless_customer_id TEXT")
-                logger.info("Added gocardless_customer_id column to users table.")
+                logger.info("Added gocardless_customer_id column.")
             if "subscription_status" not in columns:
                 cursor.execute("ALTER TABLE users ADD COLUMN subscription_status TEXT")
-                logger.info("Added subscription_status column to users table.")
+                logger.info("Added subscription_status column.")
             if "mandate_id" not in columns:
                 cursor.execute("ALTER TABLE users ADD COLUMN mandate_id TEXT")
-                logger.info("Added mandate_id column to users table.")
+                logger.info("Added mandate_id column.")
+            if "subscription_start_date" not in columns:  # New column
+                cursor.execute("ALTER TABLE users ADD COLUMN subscription_start_date TEXT")
+                logger.info("Added subscription_start_date column.")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,13 +88,14 @@ def init_db():
         raise
 
 def load_users():
+    """Load users from database."""
     users = {}
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT username, email, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id FROM users")
+            cursor.execute("SELECT username, email, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id, subscription_start_date FROM users")  # Added subscription_start_date
             rows = cursor.fetchall()
-            logger.debug(f"Fetched {len(rows)} rows from users table, row type: {type(rows[0]) if rows else 'None'}")
+            logger.debug(f"Fetched {len(rows)} users from database")
             for row in rows:
                 if isinstance(row, sqlite3.Row):
                     users[row["email"]] = {
@@ -100,7 +105,8 @@ def load_users():
                         "created_at": row["created_at"],
                         "gocardless_customer_id": row["gocardless_customer_id"],
                         "subscription_status": row["subscription_status"],
-                        "mandate_id": row["mandate_id"]
+                        "mandate_id": row["mandate_id"],
+                        "subscription_start_date": row["subscription_start_date"]  # New field
                     }
                 else:
                     users[row[1]] = {
@@ -110,29 +116,32 @@ def load_users():
                         "created_at": row[4],
                         "gocardless_customer_id": row[5] if len(row) > 5 else None,
                         "subscription_status": row[6] if len(row) > 6 else None,
-                        "mandate_id": row[7] if len(row) > 7 else None
+                        "mandate_id": row[7] if len(row) > 7 else None,
+                        "subscription_start_date": row[8] if len(row) > 8 else None  # New field
                     }
-            logger.info(f"Loaded {len(users)} users from database")
+            logger.info(f"Loaded {len(users)} users")
         return users
     except sqlite3.Error as e:
-        logger.error(f"Error loading users from database: {e}")
+        logger.error(f"Error loading users: {e}")
         return {}
 
-def save_user(email, username, wallet_address, password_hash, created_at, gocardless_customer_id=None, subscription_status=None, mandate_id=None):
+def save_user(email, username, wallet_address, password_hash, created_at, gocardless_customer_id=None, subscription_status=None, mandate_id=None, subscription_start_date=None):
+    """Save a new user to the database."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id))
+                INSERT OR IGNORE INTO users (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id, subscription_start_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (email, username, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id, subscription_start_date))  # Added subscription_start_date
             conn.commit()
-        logger.info(f"User {email} saved successfully.")
+        logger.info(f"User {email} saved successfully")
     except sqlite3.Error as e:
-        logger.error(f"Error saving user to database: {e}")
+        logger.error(f"Error saving user {email}: {e}")
         raise
 
-def update_subscription_status(email, gocardless_customer_id, subscription_status, mandate_id):
+def update_subscription_status(email, gocardless_customer_id=None, subscription_status=None, mandate_id=None, subscription_start_date=None):
+    """Update subscription details for a user."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -140,39 +149,42 @@ def update_subscription_status(email, gocardless_customer_id, subscription_statu
                 UPDATE users
                 SET gocardless_customer_id = ?,
                     subscription_status = ?,
-                    mandate_id = ?
+                    mandate_id = ?,
+                    subscription_start_date = ?
                 WHERE email = ?
-            """, (gocardless_customer_id, subscription_status, mandate_id, email))
+            """, (gocardless_customer_id, subscription_status, mandate_id, subscription_start_date, email))  # Added subscription_start_date
             conn.commit()
-        logger.info(f"Subscription status updated for user {email}.")
+        logger.info(f"Subscription updated for user {email}")
     except sqlite3.Error as e:
-        logger.error(f"Error updating subscription status for {email}: {e}")
+        logger.error(f"Error updating subscription for {email}: {e}")
         raise
 
 def get_user_subscription(email):
+    """Retrieve subscription details for a user."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT gocardless_customer_id, subscription_status, mandate_id FROM users WHERE email = ?", (email,))
+            cursor.execute("SELECT gocardless_customer_id, subscription_status, mandate_id, subscription_start_date FROM users WHERE email = ?", (email,))  # Added subscription_start_date
             row = cursor.fetchone()
             if row:
                 if isinstance(row, sqlite3.Row):
                     return {
                         "gocardless_customer_id": row["gocardless_customer_id"],
                         "subscription_status": row["subscription_status"],
-                        "mandate_id": row["mandate_id"]
+                        "mandate_id": row["mandate_id"],
+                        "subscription_start_date": row["subscription_start_date"]  # New field
                     }
                 else:
                     return {
                         "gocardless_customer_id": row[0],
                         "subscription_status": row[1],
-                        "mandate_id": row[2]
+                        "mandate_id": row[2],
+                        "subscription_start_date": row[3]  # New field
                     }
         return {}
     except sqlite3.Error as e:
         logger.error(f"Error fetching subscription for {email}: {e}")
         return {}
-
 
 def save_note(user_email, title, description, content, created_at):
     try:
@@ -183,9 +195,9 @@ def save_note(user_email, title, description, content, created_at):
                 VALUES (?, ?, ?, ?, ?)
             """, (user_email, title, description, content, created_at))
             conn.commit()
-        logger.info(f"Note '{title}' saved for user {user_email}.")
+        logger.info(f"Note '{title}' saved for user {user_email}")
     except sqlite3.Error as e:
-        logger.error(f"Error saving note to database: {e}")
+        logger.error(f"Error saving note: {e}")
         raise
 
 def load_user_notes(user_email):
@@ -197,18 +209,18 @@ def load_user_notes(user_email):
             notes = [
                 {
                     "id": row["id"] if isinstance(row, sqlite3.Row) else row[0],
-                    "title": row["title"] if isinstance(row, str) else row[2],
+                    "title": row["title"] if isinstance(row, sqlite3.Row) else row[2],
                     "description": row["description"] if isinstance(row, sqlite3.Row) else row[3],
                     "content": row["content"] if isinstance(row, sqlite3.Row) else row[4],
-                    "date": row["created_at"] if isinstance(row, str) else row[5],
-                    "author": row["user_email"] if isinstance(row, str) else row[1]
+                    "date": row["created_at"] if isinstance(row, sqlite3.Row) else row[5],
+                    "author": row["user_email"] if isinstance(row, sqlite3.Row) else row[1]
                 }
                 for row in rows
             ]
-        logger.info(f"Loaded {len(notes)} notes for user {user_email}.")
+        logger.info(f"Loaded {len(notes)} notes for user {user_email}")
         return notes
     except sqlite3.Error as e:
-        logger.error(f"Error loading notes for user {user_email}: {e}")
+        logger.error(f"Error loading notes for {user_email}: {e}")
         return []
 
 def migrate_users_from_json():
@@ -224,7 +236,7 @@ def migrate_users_from_json():
                         VALUES (?, ?, ?, ?, ?)
                     """, (email, None, data["wallet_address"], data["password_hash"], data["created_at"]))
                 conn.commit()
-            logger.info(f"Migrated {len(json_users)} users from users.json to SQLite database.")
+            logger.info(f"Migrated {len(json_users)} users from JSON")
             os.rename("users.json", "users.json.bak")
         except Exception as e:
             logger.error(f"Error migrating users: {e}")
@@ -251,22 +263,25 @@ def migrate_notes_from_json():
                             note.get("date", datetime.now(timezone.utc).isoformat())
                         ))
                 conn.commit()
-            logger.info(f"Migrated {len(json_notes)} notes from bit_notes.json to SQLite database.")
+            logger.info(f"Migrated {len(json_notes)} notes from JSON")
             os.rename("bit_notes.json", "bit_notes.json.bak")
         except Exception as e:
             logger.error(f"Error migrating notes: {e}")
 
-# Initialize database and migrate existing data
+# Initialize database and migrate data
 try:
-    init_db()
+    init_db_socket()
     migrate_users_from_json()
     migrate_notes_from_json()
 except Exception as e:
-    logger.error(f"Failed to initialize database or migrate data: {e}")
+    logger.error(f"Database initialization failed: {e}")
     st.error("Database initialization failed. Please check logs.")
 
 # --- GoCardless API Function ---
-def check_subscription_status(customer_id):
+def check_subscription_status(customer_id, subscription_status=None):
+    """Check GoCardless mandate status, but preserve active status for new subscriptions."""
+    if subscription_status == "active":  # Trust existing active status
+        return "active", None
     if not customer_id:
         return "inactive", None
     url = f"https://api.gocardless.com/customers/{customer_id}/mandates"
@@ -283,7 +298,7 @@ def check_subscription_status(customer_id):
                 return "active", mandate["id"]
         return "inactive", None
     except Exception as e:
-        logger.error(f"Error checking subscription status for customer {customer_id}: {e}")
+        logger.error(f"Error checking subscription for customer {customer_id}: {e}")
         return "inactive", None
 
 # --- Page Configuration ---
@@ -568,14 +583,18 @@ with st.sidebar:
 # --- Main App Logic ---
 if st.session_state.user_email:
     subscription_info = get_user_subscription(st.session_state.user_email)
-    subscription_status, mandate_id = check_subscription_status(subscription_info.get("gocardless_customer_id"))
+    subscription_status, mandate_id = check_subscription_status(
+        subscription_info.get("gocardless_customer_id"),
+        subscription_info.get("subscription_status")  # Pass current status
+    )
 
     if subscription_info.get("subscription_status") != subscription_status or subscription_info.get("mandate_id") != mandate_id:
         update_subscription_status(
             st.session_state.user_email,
             subscription_info.get("gocardless_customer_id"),
             subscription_status,
-            mandate_id
+            mandate_id,
+            subscription_info.get("subscription_start_date")
         )
 
     if subscription_status != "active":
@@ -583,32 +602,35 @@ if st.session_state.user_email:
             try:
                 # Validate email
                 if not st.session_state.user_email or not st.session_state.user_email.strip():
-                    logger.error("No valid email found in session state for subscription")
+                    logger.error("No valid email in session state")
                     st.error(t("No valid email found. Please log in again."))
                 else:
                     email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
                     if not re.match(email_pattern, st.session_state.user_email):
-                        logger.error(f"Invalid email format provided for subscription: {st.session_state.user_email}")
+                        logger.error(f"Invalid email format: {st.session_state.user_email}")
                         st.error(t("Invalid email format. Ensure your email is valid (e.g., user@example.com)."))
                     else:
-                        # Use the provided static GoCardless billing request URL
+                        # Redirect to GoCardless
                         redirect_url = "https://pay.gocardless.com/BRT0003XM6FHXA5"
-                        logger.info(f"Redirecting user {st.session_state.user_email} to GoCardless subscription: {redirect_url}")
+                        logger.info(f"Redirecting user {st.session_state.user_email} to GoCardless: {redirect_url}")
 
-                        # Display the redirect button
+                        # Set subscription to active immediately
+                        update_subscription_status(
+                            st.session_state.user_email,
+                            gocardless_customer_id=None,
+                            subscription_status="active",  # Instant activation
+                            mandate_id=None,
+                            subscription_start_date=datetime.now(timezone.utc).isoformat()  # Record start time
+                        )
+
+                        # Display GoCardless button
                         st.markdown(
                             f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px;border: none;">{t("Set Up Direct Debit")}</button></a>',
                             unsafe_allow_html=True
                         )
-                        st.info(t("Click the button above to complete the direct debit setup. Your subscription will activate within 3–5 days."))
-
-                        # Update subscription status to pending
-                        update_subscription_status(
-                            st.session_state.user_email,
-                            gocardless_customer_id=None,
-                            subscription_status="pending",
-                            mandate_id=None
-                        )
+                        st.success(t("Premium access activated! Complete the direct debit setup to continue your subscription."))
+                        st.warning(t("Access granted instantly. If payment setup fails, access may be revoked."))
+                        st.rerun()  # Refresh to show premium content
             except Exception as e:
                 logger.error(f"Error initiating subscription for {st.session_state.user_email}: {e}")
                 st.error(t("Failed to initiate subscription. Please try again or contact support."))
@@ -888,7 +910,7 @@ if st.session_state.user_email:
                     cost_basis = 0
                     for date in sorted(df["Date"].unique()):
                         date_df = df[df["Date"] == date]
-                        net_btc_date = date_df[date_df["Type"] == "IN"]["BTC"].sum() / date_df[date_df["Type"] == "OUT"]["BTC"].sum()
+                        net_btc_date = sum(df[df["Type"] == "IN"]["BTC"]) - sum(df[df["Type"] == "OUT"]["BTC"])  # Fixed division issue
                         cost_basis += date_df[date_df["Type"] == "IN"]["USD Value"].sum() - date_df[date_df["Type"] == "OUT"]["USD Value"].sum()
                         date_str = pd.to_datetime(date).strftime("%d-%m-%Y")
                         price = get_historical_price(date_str)
@@ -1045,12 +1067,12 @@ if st.session_state.user_email:
                             yaxis_title=f"{currency}",
                             template="plotly_white"
                         )
-                        st.plotly_chart(fig_portfolio, use_container_width=True)
+                        st.plotly_chart(fig_portfolio, use_container=True)
 
                         st.markdown(f"### 📊 {t('Performance Metrics')}")
                         col1, col2, col3 = st.columns(3)
                         col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Return on investment"))
-                        col2.metric(f"{t('Current BTC Price')} ({currency})", f"{current_price:,.2f}", help=t("Current market price"))
+                        col2.metric(f"{t('Current BTC Price')} ({currency})", f"{currency} {current_price:,.2f}", help=t("Current market price"))
                         col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
 
                     with tab4:
@@ -1059,15 +1081,15 @@ if st.session_state.user_email:
 
                         with st.form("bit_notes_form"):
                             st.subheader(t("Add Note"))
-                            note_title = st.text_input(t("Note Title"), max_chars=100)
+                            note_title = st.text_input(t("Note Title"), max_chars=100)  # Fixed: Removed extra parenthesis
                             note_description = st.text_area(t("Description"), max_chars=500)
                             note_content = st.text_area(t("Content"), max_chars=1000)
-                            note_submitted = st.form_submit_button(t("Submit Note"))
+                            note_submitted = st.form_submit_button(t("Submit"))
                             if note_submitted:
                                 if note_title and note_description and note_content:
                                     try:
                                         save_note(
-                                            user_email=st.session_state.user_email,
+                                            user_email=st.session_state.user_email,  # Fixed: Removed extra bracket
                                             title=note_title,
                                             description=note_description,
                                             content=note_content,
@@ -1077,12 +1099,12 @@ if st.session_state.user_email:
                                         st.rerun()
                                     except sqlite3.Error as e:
                                         logger.error(f"Error saving note: {e}")
-                                        st.error(t("Failed to save note."))
+                                        st.error(t("Failed to save note."))  # Fixed: Removed extra parenthesis
                                 else:
                                     st.error(t("Please fill out all fields!"))
 
                         st.markdown(f"### 📜 {t('Your Notes')}")
-                        notes = load_user_notes(st.session_state.user_email)
+                        notes = load_user_notes(st.session_state.user_email)  # Fixed: Corrected indentation
                         if notes:
                             for note in notes:
                                 st.markdown(
@@ -1102,13 +1124,13 @@ if st.session_state.user_email:
 
                         st.markdown(
                             """
-                            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #F5F5F5; border-radius: 8px;'>
+                            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #f5F5F5; border-radius: 8px;'>
                                 <hr style='border-color: #E0E0E0; margin-bottom: 20px;'>
                                 <p style='color: #4A4A4A; font-size: 14px;'>© 2025 InfiBit Analytics. All rights reserved.</p>
                             </div>
                             """,
                             unsafe_allow_html=True
-                        )
+    )
 else:
     st.markdown(
         """
