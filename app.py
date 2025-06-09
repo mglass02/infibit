@@ -626,7 +626,7 @@ if st.session_state.user_email:
                             f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px; border: none;">{t("Complete Payment Setup")}</button></a>',
                             unsafe_allow_html=True
                         )
-                        st.success(t("Premium access activated! Please complete the payment setup to continue your subscription."))
+                        st.success(t("Premium will activate when you complete the payment setup."))
             except Exception as e:
                 logger.error(f"Error initiating subscription for {st.session_state.user_email}: {e}")
                 st.error(t("Failed to initiate subscription. Please try again or contact support."))
