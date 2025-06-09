@@ -95,7 +95,7 @@ def load_users():
             cursor = conn.cursor()
             cursor.execute("SELECT username, email, wallet_address, password_hash, created_at, gocardless_customer_id, subscription_status, mandate_id, subscription_start_date FROM users")
             rows = cursor.fetchall()
-            logger.debug(f"Fetched {len(rows)} users from database")
+            logger.debug(f"Fetched {len(rows)} users")
             for row in rows:
                 if isinstance(row, sqlite3.Row):
                     users[row["email"]] = {
@@ -137,7 +137,7 @@ def save_user(email, username, wallet_address, password_hash, created_at, gocard
             conn.commit()
         logger.info(f"User {email} saved successfully")
     except sqlite3.Error as e:
-        logger.error(f"Error saving user {email}: {e}")
+        logger.error(f"Failed to save user {email}: {e}")
         raise
 
 def update_subscription_status(email, gocardless_customer_id=None, subscription_status=None, mandate_id=None, subscription_start_date=None):
@@ -412,10 +412,9 @@ st.markdown(
             padding: 4px 12px;
             border-bottom: 2px solid #E0E0E0;
         }
-        }
         .stDataFrame tr:nth-child(even) {
             background-color: #FAFAFA;
-            }
+        }
         .stSpinner div {
             color: #007BFF;
         }
@@ -611,7 +610,7 @@ if st.session_state.user_email:
                         logger.error(f"Invalid email format: {st.session_state.user_email}")
                         st.error(t("Invalid email format. Ensure your email is valid (e.g., user@example.com)."))
                     else:
-                        # Set subscription to active immediately
+                        # Set subscription to active
                         update_subscription_status(
                             st.session_state.user_email,
                             gocardless_customer_id=None,
@@ -621,15 +620,13 @@ if st.session_state.user_email:
                         )
                         logger.info(f"Activated premium access for user {st.session_state.user_email}")
 
-                        # Display GoCardless button
-                        redirect_url = "https://pay.gocardless.com/BRT0003XM6FHXA5"
+                        # Display GoCardless redirect button
+                        redirect_url = f"https://pay.gocardless.com/BRT0003XM6FHXA5?email={urllib.parse.quote(st.session_state.user_email)}"
                         st.markdown(
-                            f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px; border: none;">{t("Set Up Direct Debit")}</button></a>',
+                            f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px; border: none;">{t("Complete Payment Setup")}</button></a>',
                             unsafe_allow_html=True
                         )
-                        st.success(t("Premium access activated! Please complete the direct debit setup to continue your subscription."))
-                        st.warning(t("Access granted instantly. If payment setup fails, access may be revoked."))
-                        st.rerun()  # Refresh to show premium content
+                        st.success(t("Premium access activated! Please complete the payment setup to continue your subscription."))
             except Exception as e:
                 logger.error(f"Error initiating subscription for {st.session_state.user_email}: {e}")
                 st.error(t("Failed to initiate subscription. Please try again or contact support."))
@@ -1074,6 +1071,42 @@ if st.session_state.user_email:
                         col2.metric(f"{t('Current BTC Price')} ({currency})", f"{currency} {current_price:,.2f}", help=t("Current market price"))
                         col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
 
+                    with tab4:
+                        st.markdown(f"### 📝 {t('₿it Notes')}")
+                        st.info(t("Create and manage your notes related to your Bitcoin wallet activities."))
+                        notes = load_user_notes(st.session_state.user_email)
+                        if notes:
+                            st.subheader(t("Your Notes"))
+                            for note in notes:
+                                with st.expander(f"{note['title']} ({note['date']})"):
+                                    st.write(f"**{t('Description')}:** {note['description']}")
+                                    st.write(f"**{t('Content')}:** {note['content']}")
+                        else:
+                            st.write(t("No notes found. Create a new note below."))
+
+                        st.subheader(t("Create New Note"))
+                        with st.form("note_form"):
+                            title = st.text_input(t("Title"), max_chars=100)
+                            description = st.text_input(t("Description"), max_chars=200)
+                            content = st.text_area(t("Content"), height=150)
+                            submitted = st.form_submit_button(t("Save Note"))
+                            if submitted:
+                                if title and description and content:
+                                    try:
+                                        save_note(
+                                            user_email=st.session_state.user_email,
+                                            title=title,
+                                            description=description,
+                                            content=content,
+                                            created_at=datetime.now(timezone.utc).isoformat()
+                                        )
+                                        st.success(t("Note saved successfully!"))
+                                        st.rerun()
+                                    except sqlite3.Error as e:
+                                        st.error(t("Failed to save note. Please try again."))
+                                        logger.error(f"Note save error: {e}")
+                                else:
+                                    st.error(t("Please fill out all fields."))
 
 else:
     st.markdown(
