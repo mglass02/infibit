@@ -24,7 +24,7 @@ GOCARDLESS_API_KEY = os.getenv("GOCARDLESS_API_KEY")
 GOCARDLESS_PLAN_ID = "BRT0003XM6FHXA5"
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)  # Changed to INFO to reduce verbosity
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Database Functions ---
@@ -360,7 +360,7 @@ st.markdown(
         }
         .stMetric label {
             font-size: 0.9em;
-            font-weight: 600;
+            font-weight: bold;
             color: #4A4A4A;
             margin-bottom: 5px;
             display: flex;
@@ -368,13 +368,13 @@ st.markdown(
         }
         .stMetric .metric-value {
             font-size: 1.3em;
-            font-weight: 700;
-            color: #1A1A1A;
+            font-weight: bold;
+            color: #333;
         }
         h1, h2, h3, h4 {
             font-family: 'Inter', sans-serif;
             color: #1A1A1A;
-            font-weight: 700;
+            font-weight: bold;
         }
         h1 {
             font-size: 2.2em;
@@ -394,27 +394,28 @@ st.markdown(
             transition: background-color 0.2s;
         }
         .stButton>button:hover {
-            background-color: #0056b3;
+            background-color: #333;
         }
-        .stDataFrame table {
+        .stDataFrame {
             border-collapse: collapse;
-            width: 100%;
+            width: auto 100%;
             font-size: 14px;
         }
         .stDataFrame th {
             background-color: #F5F6F5;
-            color: #333;
+            color: white #333;
             padding: 12px;
             text-align: left;
-            font-weight: 600;
+            font-weight: bold;
         }
         .stDataFrame td {
-            padding: 12px;
-            border-bottom: 1px solid #E0E0E0;
+            padding: 4px 12px;
+            border-bottom: 2px solid #E0E0E0;
+        }
         }
         .stDataFrame tr:nth-child(even) {
             background-color: #FAFAFA;
-        }
+            }
         .stSpinner div {
             color: #007BFF;
         }
@@ -620,18 +621,13 @@ if st.session_state.user_email:
                         )
                         logger.info(f"Activated premium access for user {st.session_state.user_email}")
 
-                        # Open GoCardless URL in a new tab
+                        # Display GoCardless button
                         redirect_url = "https://pay.gocardless.com/BRT0003XM6FHXA5"
                         st.markdown(
-                            f"""
-                            <script>
-                                window.open("{redirect_url}", "_blank");
-                            </script>
-                            """,
+                            f'<a href="{redirect_url}" target="_blank"><button style="border-radius: 6px; background-color: #007BFF; color: #FFFFFF; padding: 8px; border: none;">{t("Set Up Direct Debit")}</button></a>',
                             unsafe_allow_html=True
                         )
-
-                        st.success(t("Premium access activated! Please complete the direct debit setup in the new tab."))
+                        st.success(t("Premium access activated! Please complete the direct debit setup to continue your subscription."))
                         st.warning(t("Access granted instantly. If payment setup fails, access may be revoked."))
                         st.rerun()  # Refresh to show premium content
             except Exception as e:
@@ -933,12 +929,12 @@ if st.session_state.user_email:
                         col1, col2, col3, col4 = st.columns(4)
                         col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
                         col2.metric(f"{t('Current Value')} ({currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
-                        col3.metric(f"{t('Profit/Loss')} ({currency})", f"{gain:,.2f}", delta=f"{gain_pct:.2f}%", help=t("Unrealized profit or loss"))
+                        col3.metric(f"{t('Profit/Loss')} ({currency})", f"{gain:.2f}", delta=f"{gain_pct:.2f}%", help=t("Unrealized profit or loss"))
                         col4.metric(t("30-Day Volatility"), f"{volatility:.2f}%", help=t("Annualized price volatility of Bitcoin"))
 
                         col5, col6, col7, col8 = st.columns(4)
-                        col5.metric(f"{t('Average Buy Price')} ({currency})", f"{avg_buy:,.2f}", help=t("Average price paid per Bitcoin"))
-                        col6.metric(f"{t('Total Invested')} ({currency})", f"{invested:,.2f}", help=t("Total amount invested"))
+                        col5.metric(f"{t('Average Buy Price')} ({currency})", f"{avg_buy:.2f}", help=t("Average price paid per Bitcoin"))
+                        col6.metric(f"{t('Total Invested')} ({currency})", f"{invested:.2f}", help=t("Total amount invested"))
                         col7.metric(t("Holding Period"), f"{holding_period_days} days", help=t("Days since first transaction"))
                         col8.metric(t("Sharpe Ratio"), f"{sharpe_ratio:.2f}", help=t("Risk-adjusted return"))
 
@@ -955,9 +951,9 @@ if st.session_state.user_email:
                             ],
                             t("Value"): [
                                 f"{net_btc:.8f} BTC",
-                                f"{currency} {wallet_value:,.2f}",
-                                f"{currency} {invested:,.2f}",
-                                f"{currency} {gain:,.2f}",
+                                f"{currency} {wallet_value:.2f}",
+                                f"{currency} {invested:.2f}",
+                                f"{currency} {gain:.2f}",
                                 f"{gain_pct:.2f}%",
                                 f"{volatility:.2f}%",
                                 f"{sharpe_ratio:.2f}"
@@ -1078,73 +1074,17 @@ if st.session_state.user_email:
                         col2.metric(f"{t('Current BTC Price')} ({currency})", f"{currency} {current_price:,.2f}", help=t("Current market price"))
                         col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
 
-                    with tab4:
-                        st.markdown(f"### 📝 {t('₿it Notes')}")
-                        st.markdown(t("Share your thoughts on Bitcoin or track your investment notes."))
-
-                        with st.form("bit_notes_form"):
-                            st.subheader(t("Add Note"))
-                            note_title = st.text_input(t("Note Title"), max_chars=100)
-                            note_description = st.text_area(t("Description"), max_chars=500)
-                            note_content = st.text_area(t("Content"), max_chars=1000)
-                            note_submitted = st.form_submit_button(t("Submit"))
-                            if note_submitted:
-                                if note_title and note_description and note_content:
-                                    try:
-                                        save_note(
-                                            user_email=st.session_state.user_email,
-                                            title=note_title,
-                                            description=note_description,
-                                            content=note_content,
-                                            created_at=datetime.now(timezone.utc).isoformat()
-                                        )
-                                        st.success(t("Note saved!"))
-                                        st.rerun()
-                                    except sqlite3.Error as e:
-                                        logger.error(f"Error saving note: {e}")
-                                        st.error(t("Failed to save note."))
-                                else:
-                                    st.error(t("Please fill out all fields!"))
-
-                        st.markdown(f"### 📜 {t('Your Notes')}")
-                        notes = load_user_notes(st.session_state.user_email)
-                        if notes:
-                            for note in notes:
-                                st.markdown(
-                                    f"""
-                                    <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 10px;'>
-                                        <h4>{note['title']}</h4>
-                                        <p><strong>{t('Description')}:</strong> {note['description']}</p>
-                                        <p><strong>{t('Content')}:</strong> {note['content']}</p>
-                                        <p><strong>{t('Date')}:</strong> {note['date']}</p>
-                                        <p><strong>{t('Author')}:</strong> {note['author']}</p>
-                                    </div>
-                                    """,
-                                    unsafe_allow_html=True
-                                )
-                        else:
-                            st.info(t("No notes yet. Add your first note above!"))
-
-                        st.markdown(
-                            """
-                            <div style='text-align: center; margin-top: 40px; padding: 20px; background-color: #f5F5F5; border-radius: 8px;'>
-                                <hr style='border-color: #E0E0E0; margin-bottom: 20px;'>
-                                <p style='color: #4A4A4A; font-size: 14px;'>© 2025 InfiBit Analytics. All rights reserved.</p>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
 else:
     st.markdown(
         """
         <div style='text-align: center; margin-top: 50px;'>
             <h1>Welcome to InfiBit</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
-            <p style='color: #4A4A4A;'>{1}</p>
+            <p style='color: #4A4A4A'>{1}</p>
         </div>
         """.format(
             t("Monitor your Bitcoin wallet with real-time insights"),
-            t("Please sign up or log in to access the dashboard.")
+            t("Please sign up or login to access the dashboard.")
         ),
         unsafe_allow_html=True
     )
