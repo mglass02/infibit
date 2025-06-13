@@ -116,6 +116,7 @@ st.set_page_config(
 )
 
 # --- CSS Styling ---
+# Explicitly no .blur or .paywall-container classes to prevent blurred background
 st.markdown(
     """
     <style>
@@ -280,6 +281,7 @@ with st.sidebar:
         st.session_state.tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history"))
 
 # --- Main App Logic ---
+# No subscription checks or paywall; full access granted after wallet validation
 if st.session_state.wallet_address:
     st.markdown(
         """
