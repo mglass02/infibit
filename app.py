@@ -224,6 +224,27 @@ if "tx_limit" not in st.session_state:
 if "currency" not in st.session_state:
     st.session_state.currency = "USD"
 
+# --- Sidebar: Wallet Address Input ---
+with st.sidebar:
+    st.markdown(
+        """
+        <hr style='border-color: #E0E0E0; margin: 10px 0;'>
+        <h3 style='color: #1A1A1A; font-family: Inter, sans-serif;'>Infi₿it Analytics</h3>
+        """,
+        unsafe_allow_html=True
+    )
+
+    wallet_input = st.text_input(t("Enter Bitcoin Wallet Address"), key="wallet_input")
+    if st.session_state.wallet_address:
+        if st.button(t("Clear Wallet")):
+            st.session_state.wallet_address = ""
+            st.session_state.user = None
+            st.rerun()
+        st.session_state.currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
+        language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
+        st.session_state.language = LANGUAGE_OPTIONS[language_label]
+        st.session_state.tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history"))
+
 # --- Main App Logic ---
 # No subscription checks or paywall; full access granted after wallet validation
 if st.session_state.wallet_address:
