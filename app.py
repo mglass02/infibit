@@ -27,7 +27,7 @@ def get_db_connection():
         conn.row_factory = sqlite3.Row
         logger.debug("SQLite connection established")
         yield conn
-        conn.commit()
+        conn.commit()  # Ensure changes are saved
     except sqlite3.Error as e:
         logger.error(f"Error accessing database: {e}")
         raise
@@ -41,10 +41,10 @@ def init_db():
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    email TEXT PRIMARY KEY,
-                    wallet_address TEXT UNIQUE NOT NULL,
+                    wallet_address TEXT PRIMARY KEY,
                     name TEXT,
-                    password_hash TEXT NOT NULL,
+                    email TEXT UNIQUE,
+                    password_hash TEXT,
                     created_at TEXT NOT NULL
                 )
             """)
@@ -53,54 +53,47 @@ def init_db():
         logger.error(f"Error initializing database: {e}")
         raise
 
-def load_user(email):
-    """Load user by email from database."""
+def load_user(wallet_address):
+    """Load user by wallet address from database."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT email, wallet_address, name, password_hash, created_at
-                FROM users WHERE email = ?
-            """, (email,))
+                SELECT wallet_address, name, email, password_hash, created_at
+                FROM users WHERE wallet_address = ?
+            """, (wallet_address,))
             row = cursor.fetchone()
             if row:
                 return {
-                    "email": row["email"],
                     "wallet_address": row["wallet_address"],
                     "name": row["name"],
+                    "email": row["email"],
                     "password_hash": row["password_hash"],
                     "created_at": row["created_at"]
                 }
         return None
     except sqlite3.Error as e:
-        logger.error(f"Error loading user {email}: {e}")
+        logger.error(f"Error loading user {wallet_address}: {e}")
         return None
 
 def save_user(wallet_address, name, email, password, created_at):
     """Save a new user to the database with hashed password."""
     try:
-        password_hash = hash_password(password)
+        password_hash = hash_password(password) if password else None
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO users (email, wallet_address, name, password_hash, created_at)
+                INSERT OR REPLACE INTO users (wallet_address, name, email, password_hash, created_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (email, wallet_address, name if name else None, password_hash, created_at))
-        logger.info(f"User with email {email} saved successfully")
+            """, (wallet_address, name, email, password_hash, created_at))
+        logger.info(f"User with wallet {wallet_address} saved successfully")
     except sqlite3.Error as e:
-        logger.error(f"Failed to save user {email}: {e}")
+        logger.error(f"Failed to save user {wallet_address}: {e}")
         raise
 
 # --- Password Hashing ---
 def hash_password(password):
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-def verify_password(password, password_hash):
-    try:
-        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
-    except Exception as e:
-        logger.error(f"Password verification error: {e}")
-        return False
 
 # --- Wallet Address Validation ---
 def validate_wallet_address(address):
@@ -219,16 +212,18 @@ def t(text):
         return text
 
 # --- Session State Initialization ---
+if "wallet_address" not in st.session_state:
+    st.session_state.wallet_address = ""
 if "user" not in st.session_state:
     st.session_state.user = None
 if "language" not in st.session_state:
     st.session_state.language = "en"
+if "tx_limit" not in st.session_state:
+    st.session_state.tx_limit = "Last 20"
 if "currency" not in st.session_state:
     st.session_state.currency = "USD"
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
 
-# --- Sidebar: Only Currency and Language ---
+# --- Sidebar: Wallet Address Input ---
 with st.sidebar:
     st.markdown(
         """
@@ -237,17 +232,55 @@ with st.sidebar:
         """,
         unsafe_allow_html=True
     )
-    if st.session_state.authenticated:
+
+    wallet_input = st.text_input(t("Enter Bitcoin Wallet Address"), key="wallet_input")
+    if st.button(t("Access Dashboard")):
+        if wallet_input:
+            if not validate_wallet_address(wallet_input):
+                st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
+            else:
+                user = load_user(wallet_input)
+                if not user:
+                    # New user, prompt for additional info
+                    with st.form("signup_form"):
+                        name = st.text_input(t("Name (Optional)"), key="signup_name")
+                        email = st.text_input(t("Email (Optional)"), key="signup_email")
+                        password = st.text_input(t("Password (Optional)"), type="password", key="signup_password")
+                        if st.form_submit_button(t("Save Details")):
+                            try:
+                                save_user(
+                                    wallet_address=wallet_input,
+                                    name=name if name else None,
+                                    email=email if email else None,
+                                    password=password if password else None,
+                                    created_at=datetime.now(timezone.utc).isoformat()
+                                )
+                                st.session_state.wallet_address = wallet_input
+                                st.session_state.user = load_user(wallet_input)
+                                st.success(t("Wallet details saved! Accessing dashboard..."))
+                                st.rerun()
+                            except sqlite3.Error:
+                                st.error(t("Failed to save wallet details. Please try again."))
+                else:
+                    st.session_state.wallet_address = wallet_input
+                    st.session_state.user = user
+                    st.success(t("Wallet recognized! Accessing dashboard..."))
+                    st.rerun()
+        else:
+            st.error(t("Please enter a wallet address."))
+
+    if st.session_state.wallet_address:
+        if st.button(t("Clear Wallet")):
+            st.session_state.wallet_address = ""
+            st.session_state.user = None
+            st.rerun()
         st.session_state.currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
         language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
         st.session_state.language = LANGUAGE_OPTIONS[language_label]
-        if st.button(t("Logout")):
-            st.session_state.user = None
-            st.session_state.authenticated = False
-            st.rerun()
+        st.session_state.tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history"))
 
 # --- Main App Logic ---
-if st.session_state.authenticated and st.session_state.user:
+if st.session_state.wallet_address:
     st.markdown(
         """
         <div style='text-align: center; margin-top: 30px;'>
@@ -262,9 +295,9 @@ if st.session_state.authenticated and st.session_state.user:
         f"""
         <div style='border: 1px solid #E0E0E0; border-radius: 8px; padding: 15px; margin-bottom: 20px;'>
             <h3>{t("Wallet Information")}</h3>
-            <p><strong>{t("Bitcoin Wallet Address")}:</strong> {st.session_state.user['wallet_address']}</p>
-            <p><strong>{t("Name")}:</strong> {st.session_state.user.get('name', 'Not provided')}</p>
-            <p><strong>{t("Email")}:</strong> {st.session_state.user.get('email', 'Not provided')}</p>
+            <p><strong>{t("Bitcoin Wallet Address")}:</strong> {st.session_state.wallet_address}</p>
+            <p><strong>{t("Name")}:</strong> {st.session_state.user.get('name', 'Not provided') if st.session_state.user else 'Not provided'}</p>
+            <p><strong>{t("Email")}:</strong> {st.session_state.user.get('email', 'Not provided') if st.session_state.user else 'Not provided'}</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -322,11 +355,26 @@ if st.session_state.authenticated and st.session_state.user:
         url = f"https://blockstream.info/api/address/{address}/txs"
         try:
             logger.info(f"Fetching transactions for address: {address}")
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            txs = response.json()
-            all_txs.extend(txs[:20])  # Default to Last 20
-            logger.info(f"Fetched {len(all_txs)} transactions (limited to 20)")
+            if st.session_state.tx_limit == "Last 20":
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                txs = response.json()
+                all_txs.extend(txs[:20])
+                logger.info(f"Fetched {len(all_txs)} transactions (limited to 20)")
+            else:
+                while True:
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    txs = response.json()
+                    if not txs:
+                        break
+                    all_txs.extend(txs)
+                    if len(txs) < 25:
+                        break
+                    last_txid = txs[-1]['txid']
+                    url = f"https://blockstream.info/api/address/{address}/txs/chain/{last_txid}"
+                    time.sleep(1)
+                logger.info(f"Fetched {len(all_txs)} transactions (all)")
             if not all_txs:
                 logger.warning(f"No transactions found for address: {address}")
             return all_txs
@@ -439,11 +487,11 @@ if st.session_state.authenticated and st.session_state.user:
 
     with st.container():
         with st.spinner(t("Loading wallet insights...")):
-            df, total_btc_in, total_btc_out, usd_in, usd_out, first_tx_date = get_wallet_stats(st.session_state.user['wallet_address'])
+            df, total_btc_in, total_btc_out, usd_in, usd_out, first_tx_date = get_wallet_stats(st.session_state.wallet_address)
             if isinstance(df, pd.DataFrame) and df.empty:
                 st.warning(t("No transactions found for this wallet."))
             current_price_usd = get_current_btc_price()
-            net_btc = get_wallet_balance(st.session_state.user['wallet_address'])
+            net_btc = get_wallet_balance(st.session_state.wallet_address)
             if net_btc == 0 and not isinstance(df, pd.DataFrame):
                 st.error(t("Failed to fetch wallet balance. Please try again later."))
 
@@ -458,7 +506,7 @@ if st.session_state.authenticated and st.session_state.user:
 
             if net_btc < 0:
                 logger.error(f"Invalid balance detected: {net_btc:.8f} BTC")
-                st.error(t("Error: Invalid balance detected. Please try again later."))
+                st.error(t("Error: Invalid balance detected. Please try fetching all transactions."))
                 net_btc = 0
                 wallet_value = 0
                 gain = 0
@@ -489,6 +537,8 @@ if st.session_state.authenticated and st.session_state.user:
 
             with tab1:
                 st.markdown(f"### 💼 {t('Wallet Overview')}")
+                if st.session_state.tx_limit == "Last 20":
+                    st.warning(t("Showing metrics based on the last 20 transactions. For full accuracy, select 'All' transactions."))
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric(t("Bitcoin Balance"), f"{net_btc:.8f} BTC", help=t("Total Bitcoin in your wallet"))
                 col2.metric(f"{t('Current Value')} ({st.session_state.currency})", f"{wallet_value:,.2f}", help=t("Current market value of your Bitcoin"))
@@ -636,66 +686,17 @@ if st.session_state.authenticated and st.session_state.user:
                 col1.metric(t("ROI"), f"{gain_pct:.2f}%", help=t("Return on investment"))
                 col2.metric(f"{t('Current BTC Price')} ({st.session_state.currency})", f"{st.session_state.currency} {current_price:,.2f}", help=t("Current market price"))
                 col3.metric(t("Max Drawdown"), f"{max_drawdown:.2f}%", help=t("Maximum portfolio value drop"))
-
 else:
     st.markdown(
         """
         <div style='text-align: center; margin-top: 50px;'>
             <h1>Welcome to Infi₿it</h1>
             <p style='color: #4A4A4A; font-size: 1.1em;'>{0}</p>
+            <p style='color: #4A4A4A'>{1}</p>
         </div>
-        """.format(t("Monitor your Bitcoin wallet with real-time insights")),
+        """.format(
+            t("Monitor your Bitcoin wallet with real-time insights"),
+            t("Enter your Bitcoin wallet address in the sidebar to access the dashboard.")
+        ),
         unsafe_allow_html=True
     )
-
-    # Tabs for Login and Signup
-    login_tab, signup_tab = st.tabs([t("Login"), t("Signup")])
-
-    with login_tab:
-        with st.form("login_form"):
-            login_email = st.text_input(t("Email"), key="login_email")
-            login_password = st.text_input(t("Password"), type="password", key="login_password")
-            if st.form_submit_button(t("Login")):
-                if login_email and login_password:
-                    user = load_user(login_email)
-                    if user and verify_password(login_password, user["password_hash"]):
-                        st.session_state.user = user
-                        st.session_state.authenticated = True
-                        st.success(t("Login successful! Accessing dashboard..."))
-                        st.rerun()
-                    else:
-                        st.error(t("Invalid email or password."))
-                else:
-                    st.error(t("Please provide both email and password."))
-
-    with signup_tab:
-        with st.form("signup_form"):
-            wallet_input = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
-            name = st.text_input(t("Name (Optional)"), key="signup_name")
-            signup_email = st.text_input(t("Email"), key="signup_email")
-            signup_password = st.text_input(t("Password"), type="password", key="signup_password")
-            if st.form_submit_button(t("Sign Up")):
-                if not wallet_input:
-                    st.error(t("Please provide a Bitcoin wallet address."))
-                elif not validate_wallet_address(wallet_input):
-                    st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
-                elif not signup_email:
-                    st.error(t("Please provide an email address."))
-                elif not signup_password:
-                    st.error(t("Please provide a password."))
-                else:
-                    try:
-                        save_user(
-                            wallet_address=wallet_input,
-                            name=name,
-                            email=signup_email,
-                            password=signup_password,
-                            created_at=datetime.now(timezone.utc).isoformat()
-                        )
-                        user = load_user(signup_email)
-                        st.session_state.user = user
-                        st.session_state.authenticated = True
-                        st.success(t("Sign up successful! Accessing dashboard..."))
-                        st.rerun()
-                    except sqlite3.Error:
-                        st.error(t("Failed to save user details. Email or wallet address may already be in use."))
