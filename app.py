@@ -313,7 +313,7 @@ with st.sidebar:
                         except sqlite3.Error:
                             st.error(t("Failed to save user details. Email or wallet address may already be in use."))
     else:
-        if st.button(t("Clear Wallet")):
+        if st.button(t("Log out")):
             st.session_state.user = None
             st.session_state.authenticated = False
             st.rerun()
