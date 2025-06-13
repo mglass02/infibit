@@ -262,56 +262,56 @@ with st.sidebar:
     )
 
     if not st.session_state.authenticated:
-        wallet_input = st.text_input(t("Enter Bitcoin Wallet Address"), key="wallet_input")
-        if st.button(t("Access Dashboard")):
-            if wallet_input:
-                if not validate_wallet_address(wallet_input):
-                    st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
-                else:
-                    user = load_user_by_wallet(wallet_input)
-                    if not user:
-                        # New user, show signup form
-                        with st.form("signup_form"):
-                            name = st.text_input(t("Name (Optional)"), key="signup_name")
-                            email = st.text_input(t("Email"), key="signup_email")
-                            password = st.text_input(t("Password"), type="password", key="signup_password")
-                            if st.form_submit_button(t("Sign Up")):
-                                if not email:
-                                    st.error(t("Please provide an email address."))
-                                elif not password:
-                                    st.error(t("Please provide a password."))
-                                else:
-                                    try:
-                                        save_user(
-                                            wallet_address=wallet_input,
-                                            name=name,
-                                            email=email,
-                                            password=password,
-                                            created_at=datetime.now(timezone.utc).isoformat()
-                                        )
-                                        st.session_state.user = load_user_by_wallet(wallet_input)
-                                        st.session_state.authenticated = True
-                                        st.success(t("Sign up successful! Accessing dashboard..."))
-                                        st.rerun()
-                                    except sqlite3.Error:
-                                        st.error(t("Failed to save details. Email or wallet address may already be in use."))
+        # Login and Signup Tabs
+        login_tab, signup_tab = st.tabs([t("Login"), t("Signup")])
+
+        with login_tab:
+            with st.form("login_form"):
+                login_email = st.text_input(t("Email"), key="login_email")
+                login_password = st.text_input(t("Password"), type="password", key="login_password")
+                if st.form_submit_button(t("Login")):
+                    if login_email and login_password:
+                        user = load_user_by_email(login_email)
+                        if user and verify_password(login_password, user["password_hash"]):
+                            st.session_state.user = user
+                            st.session_state.authenticated = True
+                            st.success(t("Login successful! Accessing dashboard..."))
+                            st.rerun()
+                        else:
+                            st.error(t("Invalid email or password."))
                     else:
-                        # Existing user, show login form
-                        with st.form("login_form"):
-                            email = st.text_input(t("Email"), key="login_email")
-                            password = st.text_input(t("Password"), type="password", key="login_password")
-                            if st.form_submit_button(t("Login")):
-                                if email and password:
-                                    login_user = load_user_by_email(email)
-                                    if login_user and verify_password(password, login_user["password_hash"]) and login_user["wallet_address"] == wallet_input:
-                                        st.session_state.user = login_user
-                                        st.session_state.authenticated = True
-                                        st.success(t("Login successful! Accessing dashboard..."))
-                                        st.rerun()
-                                    else:
-                                        st.error(t("Invalid email, password, or wallet address."))
-                                else:
-                                    st.error(t("Please provide both email and password."))
+                        st.error(t("Please provide both email and password."))
+
+        with signup_tab:
+            with st.form("signup_form"):
+                wallet_input = st.text_input(t("Bitcoin Wallet Address"), key="signup_wallet")
+                name = st.text_input(t("Name (Optional)"), key="signup_name")
+                signup_email = st.text_input(t("Email"), key="signup_email")
+                signup_password = st.text_input(t("Password"), type="password", key="signup_password")
+                if st.form_submit_button(t("Sign Up")):
+                    if not wallet_input:
+                        st.error(t("Please provide a Bitcoin wallet address."))
+                    elif not validate_wallet_address(wallet_input):
+                        st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
+                    elif not signup_email:
+                        st.error(t("Please provide an email address."))
+                    elif not signup_password:
+                        st.error(t("Please provide a password."))
+                    else:
+                        try:
+                            save_user(
+                                wallet_address=wallet_input,
+                                name=name,
+                                email=signup_email,
+                                password=signup_password,
+                                created_at=datetime.now(timezone.utc).isoformat()
+                            )
+                            st.session_state.user = load_user_by_email(signup_email)
+                            st.session_state.authenticated = True
+                            st.success(t("Sign up successful! Accessing dashboard..."))
+                            st.rerun()
+                        except sqlite3.Error:
+                            st.error(t("Failed to save user details. Email or wallet address may already be in use."))
     else:
         if st.button(t("Clear Wallet")):
             st.session_state.user = None
@@ -721,7 +721,7 @@ else:
         </div>
         """.format(
             t("Monitor your Bitcoin wallet with real-time insights"),
-            t("Enter your Bitcoin wallet address in the sidebar to access the dashboard.")
+            t("Please login or sign up in the sidebar to access the dashboard.")
         ),
         unsafe_allow_html=True
     )
