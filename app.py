@@ -224,62 +224,6 @@ if "tx_limit" not in st.session_state:
 if "currency" not in st.session_state:
     st.session_state.currency = "USD"
 
-# --- Sidebar: Wallet Address Input ---
-with st.sidebar:
-    st.markdown(
-        """
-        <hr style='border-color: #E0E0E0; margin: 10px 0;'>
-        <h3 style='color: #1A1A1A; font-family: Inter, sans-serif;'>Infi₿it Analytics</h3>
-        """,
-        unsafe_allow_html=True
-    )
-
-    wallet_input = st.text_input(t("Enter Bitcoin Wallet Address"), key="wallet_input")
-    if st.button(t("Access Dashboard")):
-        if wallet_input:
-            if not validate_wallet_address(wallet_input):
-                st.error(t("Invalid Bitcoin address (must start with 'bc1', '1', or '3', 26–62 characters)."))
-            else:
-                user = load_user(wallet_input)
-                if not user:
-                    # New user, prompt for additional info
-                    with st.form("signup_form"):
-                        name = st.text_input(t("Name (Optional)"), key="signup_name")
-                        email = st.text_input(t("Email (Optional)"), key="signup_email")
-                        password = st.text_input(t("Password (Optional)"), type="password", key="signup_password")
-                        if st.form_submit_button(t("Save Details")):
-                            try:
-                                save_user(
-                                    wallet_address=wallet_input,
-                                    name=name if name else None,
-                                    email=email if email else None,
-                                    password=password if password else None,
-                                    created_at=datetime.now(timezone.utc).isoformat()
-                                )
-                                st.session_state.wallet_address = wallet_input
-                                st.session_state.user = load_user(wallet_input)
-                                st.success(t("Wallet details saved! Accessing dashboard..."))
-                                st.rerun()
-                            except sqlite3.Error:
-                                st.error(t("Failed to save wallet details. Please try again."))
-                else:
-                    st.session_state.wallet_address = wallet_input
-                    st.session_state.user = user
-                    st.success(t("Wallet recognized! Accessing dashboard..."))
-                    st.rerun()
-        else:
-            st.error(t("Please enter a wallet address."))
-
-    if st.session_state.wallet_address:
-        if st.button(t("Clear Wallet")):
-            st.session_state.wallet_address = ""
-            st.session_state.user = None
-            st.rerun()
-        st.session_state.currency = st.selectbox(t("💱 Currency"), options=["USD", "GBP", "EUR"], index=0, key="currency_select")
-        language_label = st.selectbox(t("🌐 Language"), options=list(LANGUAGE_OPTIONS.keys()), index=0, key="language_select")
-        st.session_state.language = LANGUAGE_OPTIONS[language_label]
-        st.session_state.tx_limit = st.selectbox(t("📜 Transaction Limit"), ["Last 20", "All"], index=0, help=t("Choose 'Last 20' for speed or 'All' for full history"))
-
 # --- Main App Logic ---
 # No subscription checks or paywall; full access granted after wallet validation
 if st.session_state.wallet_address:
